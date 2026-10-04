@@ -1,5 +1,5 @@
 ---
-title: "Gemma Garage: a local Gemma reads my uncle's scribbled notes and orders the parts"
+title: "Gemma Garage: a local Gemma reads a mechanic's scribbled notes and orders the parts"
 tags: devchallenge, weekendchallenge, hf26challenge, opensource
 ---
 
@@ -21,7 +21,7 @@ Everything in the interface is in Spanish because that is what he reads.
 
 ## Demo
 
-<!-- Pega aquí el vídeo (docs/media/taller-demo.mp4) o el enlace de YouTube -->
+▶️ **Full walkthrough video (57 s):** https://github.com/antoniahp/gemma-garage/blob/main/docs/media/taller-demo.mp4
 
 **Typing a note and watching Gemma read it, live:**
 
@@ -64,10 +64,6 @@ Django + Postgres (SQLite fallback), server-rendered pages, Django admin for the
 ## Why Does Open Innovation Matter?
 
 A one-person workshop will not send its customers' data to a cloud model, and will not pay per call to read three words about an oil filter. An open-weight model that runs on the laptop already on his desk makes this possible: private, free after the download, and good enough once you give it a narrow job and check its output. Open weights also mean he (or I) can swap the model, read the prompt and fix it when it gets something wrong, which matters more than a bigger model when the notes are in Spanish workshop slang.
-
-## My Agent Session
-
-<!-- Opcional: enlace a la sesión de Claude Code -->
 
 ## Prize Categories
 
