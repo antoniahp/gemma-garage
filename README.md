@@ -1,6 +1,5 @@
 # Gemma Garage
 
-**English** · [Español](README.es.md)
 
 *A local-first appointment book for a car workshop. A local Gemma model reads the mechanic's notes and does the paperwork.*
 
@@ -175,7 +174,7 @@ If a customer is due a reminder and hasn't linked Telegram yet, the bot **sends 
 
 ## Parts supplier
 
-By default it is a test supplier (`outbox/pedidos.jsonl`). With `TALLER_SUPPLIER=email` and the `SMTP_*` and `SUPPLIER_EMAIL` variables (see `.env.example`) it sends by email. Bosch, Lozano and other distributors don't usually offer a standard public API; ordering by email or through their portal is the norm. For a specific portal, add another class with `send_order()` in `taller/channels.py`.
+By default it is a test supplier (`outbox/pedidos.jsonl`). With `TALLER_SUPPLIER=email` and the `SMTP_*` and `SUPPLIER_EMAIL` variables (see `.env.example`) it sends by email. Bosch, Lozano and other distributors don't usually offer a standard public API; ordering by email or through their portal is the norm. For a specific portal, add another `PartsSupplier` adapter in `taller/infrastructure/` (see Architecture).
 
 ## Local AI (optional but recommended)
 
@@ -189,6 +188,24 @@ The model only interprets text. Dates, orders and money are plain code, and the 
 - Customer data stays in your Postgres. With local Gemma, the notes never leave the machine.
 - Check the labour rates in *Tarifas*; you type part prices when invoicing. The invoice is a printable draft and does not replace certified invoicing software.
 - Back up the database.
+
+## Architecture
+
+The code follows a hexagonal (ports and adapters) layout under `taller/`:
+
+```
+taller/
+  domain/          entities (Django models), ports (ABCs), criteria, exceptions, pure rules
+  application/     one folder per use case: <name>_command.py / _query.py + its handler
+  infrastructure/  adapters: DB repositories, Ollama + rules parsers, suppliers, notifiers, Telegram
+  container.py     composition root: the only place that wires ports to adapters
+  views.py, admin.py, forms.py, management/   thin entry points that call handlers
+```
+
+- **Ports** (`domain/ports`): `NoteParser`, `PartsSupplier`, `ClientNotifier`, plus one repository interface per aggregate.
+- **Gemma is an adapter**: `OllamaNoteParser` is wrapped by `NoteParserWithFallback`, which falls back to `RulesNoteParser` and records why.
+- **Add a supplier** (e.g. a distributor portal): implement `PartsSupplier.send_order()` in `taller/infrastructure/` and select it in `container.parts_supplier()`.
+- **Tests** run use cases against in-memory fake ports (`taller/tests_application.py`), no database or network needed.
 
 ## Tests
 

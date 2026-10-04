@@ -7,11 +7,65 @@ from unittest import mock
 from django.contrib.auth import get_user_model
 from django.test import TestCase, override_settings
 
-from . import services, telegram
+import dataclasses
+from decimal import Decimal
+
+from taller import container
+from taller.application.complete_and_invoice_appointment.complete_and_invoice_appointment_command import (
+    CompleteAndInvoiceAppointmentCommand,
+)
+from taller.application.create_appointment.create_appointment_command import CreateAppointmentCommand
+from taller.application.find_labor_price.find_labor_price_query import FindLaborPriceQuery
+from taller.application.process_telegram_update.process_telegram_update_command import (
+    ProcessTelegramUpdateCommand,
+)
+from taller.application.process_telegram_update.process_telegram_update_command_handler import (
+    ProcessTelegramUpdateCommandHandler,
+)
+from taller.application.run_daily.run_daily_command import RunDailyCommand
+from taller.domain import business_calendar
+from taller.infrastructure import ollama_note_parser as ollama_parser
+from taller.infrastructure import telegram_api
+from taller.infrastructure.repositories.db_client_repository import DbClientRepository
+from taller.infrastructure.rules_note_parser import RulesNoteParser
+
 from .models import Appointment, Client, Reminder
-from .parser import parse_note
 
 os.environ["TALLER_NO_LLM"] = "1"
+
+
+# ---- ayudas: los tests entran por los casos de uso, igual que las vistas
+def parse_note(note, use_llm=True, vehicle=""):
+    parser = container.note_parser() if use_llm else RulesNoteParser()
+    return dataclasses.asdict(parser.parse(note, vehicle=vehicle))
+
+
+def run_daily(today=None):
+    return container.run_daily_handler().handle(RunDailyCommand(today=today))
+
+
+def complete_and_invoice(appointment, **kw):
+    return container.complete_and_invoice_handler().handle(
+        CompleteAndInvoiceAppointmentCommand(appointment_id=appointment.pk, **kw))
+
+
+def labor_price(service):
+    return container.find_labor_price_handler().handle(FindLaborPriceQuery(service=service))
+
+
+def handle_update(update, reply):
+    return ProcessTelegramUpdateCommandHandler(DbClientRepository(), reply).handle(
+        ProcessTelegramUpdateCommand(update=update))
+
+
+def make_appointment(client, day, note, plate="", vehicle="", **extra):
+    """Crea una cita como lo hace la web: se interpreta la nota y se programa el aviso anual."""
+    appt = container.create_appointment_handler().handle(CreateAppointmentCommand(
+        date=day, client_name=client.name, note=note, phone=client.phone, plate=plate, vehicle=vehicle))
+    if extra:
+        Appointment.objects.filter(pk=appt.pk).update(**extra)
+        appt.refresh_from_db()
+    return appt
 
 
 class OutboxMixin:
@@ -49,16 +103,16 @@ class ParserTests(TestCase):
 
 class DateTests(TestCase):
     def test_fin_de_mes(self):
-        self.assertEqual(services.add_months(date(2028, 2, 29), 12), date(2029, 2, 28))
+        self.assertEqual(business_calendar.add_months(date(2028, 2, 29), 12), date(2029, 2, 28))
 
     def test_lunes_se_pide_el_viernes(self):
-        self.assertEqual(services.previous_business_day(date(2026, 10, 12)), date(2026, 10, 9))
+        self.assertEqual(business_calendar.previous_business_day(date(2026, 10, 12)), date(2026, 10, 9))
 
 
 class PedidosTests(OutboxMixin, TestCase):
     def cita(self, day, note, **kw):
         client = Client.objects.create(name=kw.pop("name", "Pepe"), phone="+34600000000")
-        return Appointment.objects.create(client=client, date=day, note=note, **kw)
+        return make_appointment(client, day, note, **kw)
 
     def test_la_nota_se_interpreta_al_guardar(self):
         a = self.cita(date(2026, 10, 6), "cambio aceite motor opel aceite 5w30")
@@ -68,28 +122,28 @@ class PedidosTests(OutboxMixin, TestCase):
 
     def test_pide_el_dia_antes_y_solo_una_vez(self):
         self.cita(date(2026, 10, 6), "cambio aceite motor opel aceite 5w30")  # martes
-        self.assertEqual(services.run_daily(date(2026, 10, 3))["orders"], [])  # sábado: aún no
-        self.assertEqual(len(services.run_daily(date(2026, 10, 5))["orders"]), 1)  # lunes
+        self.assertEqual(run_daily(date(2026, 10, 3))["orders"], [])  # sábado: aún no
+        self.assertEqual(len(run_daily(date(2026, 10, 5))["orders"]), 1)  # lunes
         pedido = self.outbox("pedidos.jsonl")[0]
         self.assertEqual(pedido["deliver_on"], "2026-10-06")
         self.assertTrue(any(p["spec"] == "5W30" for p in pedido["parts"]))
-        self.assertEqual(services.run_daily(date(2026, 10, 5))["orders"], [])  # no duplica
+        self.assertEqual(run_daily(date(2026, 10, 5))["orders"], [])  # no duplica
         self.assertEqual(len(self.outbox("pedidos.jsonl")), 1)
 
     def test_si_no_se_ejecuto_antes_pide_el_mismo_dia(self):
         self.cita(date(2026, 10, 6), "cambio aceite opel")
-        self.assertEqual(len(services.run_daily(date(2026, 10, 6))["orders"]), 1)
+        self.assertEqual(len(run_daily(date(2026, 10, 6))["orders"]), 1)
 
     def test_itv_no_genera_pedido(self):
         self.cita(date(2026, 10, 6), "ITV seat leon")
-        self.assertEqual(services.run_daily(date(2026, 10, 5))["orders"], [])
+        self.assertEqual(run_daily(date(2026, 10, 5))["orders"], [])
 
     def test_si_el_proveedor_falla_no_se_marca_pedido(self):
         a = self.cita(date(2026, 10, 6), "cambio aceite opel")
-        with mock.patch("taller.services.get_supplier") as sup:
+        with mock.patch("taller.container.parts_supplier") as sup:
             sup.return_value.name = "x"
             sup.return_value.send_order.side_effect = RuntimeError("sin conexión")
-            rep = services.run_daily(date(2026, 10, 5))
+            rep = run_daily(date(2026, 10, 5))
         self.assertEqual(rep["orders"], [])
         self.assertEqual(len(rep["errors"]), 1)
         a.refresh_from_db()
@@ -100,18 +154,17 @@ class AvisosTests(OutboxMixin, TestCase):
     def setUp(self):
         super().setUp()
         self.client_obj = Client.objects.create(name="Ana", phone="+34611111111")
-        Appointment.objects.create(client=self.client_obj, date=date(2026, 10, 6),
-                                   note="cambio aceite opel", plate="1234ABC")
+        make_appointment(self.client_obj, date(2026, 10, 6), "cambio aceite opel", plate="1234ABC")
 
     def test_aviso_una_semana_antes_del_ano_siguiente(self):
         self.assertEqual(Reminder.objects.get().send_on, date(2027, 9, 29))
-        self.assertEqual(services.run_daily(date(2027, 9, 1))["reminders"], [])
-        self.assertEqual(len(services.run_daily(date(2027, 9, 29))["reminders"]), 1)
+        self.assertEqual(run_daily(date(2027, 9, 1))["reminders"], [])
+        self.assertEqual(len(run_daily(date(2027, 9, 29))["reminders"]), 1)
         self.assertIn("06/10/2027", self.outbox("avisos.jsonl")[0]["text"])
-        self.assertEqual(services.run_daily(date(2027, 9, 30))["reminders"], [])  # no se repite
+        self.assertEqual(run_daily(date(2027, 9, 30))["reminders"], [])  # no se repite
 
     def test_itv_programa_aviso_aunque_no_haya_telegram(self):
-        Appointment.objects.create(client=self.client_obj, date=date(2026, 10, 7), note="ITV seat")
+        make_appointment(self.client_obj, date(2026, 10, 7), "ITV seat")
         self.assertEqual(Reminder.objects.count(), 2)
 
 
@@ -121,7 +174,7 @@ class TelegramTests(TestCase):
     def setUp(self):
         self.cli = Client.objects.create(name="Ana", phone="+34611111111")
         self.sent = []
-        patcher = mock.patch("taller.telegram.send", side_effect=lambda c, t: self.sent.append((c, t)))
+        patcher = mock.patch("taller.infrastructure.telegram_api.send", side_effect=lambda c, t: self.sent.append((c, t)))
         patcher.start()
         self.addCleanup(patcher.stop)
 
@@ -129,7 +182,7 @@ class TelegramTests(TestCase):
         return {"update_id": 1, "message": {"text": text, "chat": {"id": chat}}}
 
     def test_start_con_enlace_vincula_al_cliente(self):
-        res = telegram.handle_update(self.update(f"/start {self.cli.link_token}"),
+        res = handle_update(self.update(f"/start {self.cli.link_token}"),
                                      reply=lambda c, t: self.sent.append((c, t)))
         self.assertEqual(res, f"vinculado:{self.cli.pk}")
         self.cli.refresh_from_db()
@@ -137,26 +190,26 @@ class TelegramTests(TestCase):
         self.assertIn("https://t.me/MiTallerBot?start=", self.cli.telegram_link)
 
     def test_start_con_token_falso_no_vincula(self):
-        res = telegram.handle_update(self.update("/start inventado"), reply=lambda c, t: None)
+        res = handle_update(self.update("/start inventado"), reply=lambda c, t: None)
         self.assertEqual(res, "sin_enlace")
         self.cli.refresh_from_db()
         self.assertIsNone(self.cli.telegram_chat_id)
 
     def test_comando_id_devuelve_el_chat(self):
         replies = []
-        telegram.handle_update(self.update("/id", chat=42), reply=lambda c, t: replies.append((c, t)))
+        handle_update(self.update("/id", chat=42), reply=lambda c, t: replies.append((c, t)))
         self.assertEqual(replies, [(42, "Tu id de chat es: 42")])
 
     def test_aviso_a_cliente_vinculado_va_a_su_chat(self):
         self.cli.telegram_chat_id = 555
         self.cli.save()
-        Appointment.objects.create(client=self.cli, date=date(2026, 10, 6), note="ITV seat")
-        services.run_daily(date(2027, 9, 29))
+        make_appointment(self.cli, date(2026, 10, 6), "ITV seat")
+        run_daily(date(2027, 9, 29))
         self.assertIn(555, [c for c, _ in self.sent])
 
     def test_cliente_sin_vincular_se_avisa_al_mecanico(self):
-        Appointment.objects.create(client=self.cli, date=date(2026, 10, 6), note="ITV seat")
-        services.run_daily(date(2027, 9, 29))
+        make_appointment(self.cli, date(2026, 10, 6), "ITV seat")
+        run_daily(date(2027, 9, 29))
         owner_msgs = [t for c, t in self.sent if str(c) == "999"]
         self.assertTrue(any("Avísale tú: Ana" in t for t in owner_msgs))
         self.assertTrue(Reminder.objects.get().sent)
@@ -164,9 +217,9 @@ class TelegramTests(TestCase):
     def test_error_de_telegram_no_marca_como_enviado(self):
         self.cli.telegram_chat_id = 555
         self.cli.save()
-        Appointment.objects.create(client=self.cli, date=date(2026, 10, 6), note="ITV seat")
-        with mock.patch("taller.telegram.send", side_effect=telegram.TelegramError("caído")):
-            rep = services.run_daily(date(2027, 9, 29))
+        make_appointment(self.cli, date(2026, 10, 6), "ITV seat")
+        with mock.patch("taller.infrastructure.telegram_api.send", side_effect=telegram_api.TelegramError("caído")):
+            rep = run_daily(date(2027, 9, 29))
         self.assertEqual(len(rep["errors"]), 1)
         self.assertFalse(Reminder.objects.get().sent)
 
@@ -175,20 +228,19 @@ class FacturaYAdminTests(OutboxMixin, TestCase):
     def setUp(self):
         super().setUp()
         cli = Client.objects.create(name="Pepe")
-        self.appt = Appointment.objects.create(client=cli, date=date(2026, 10, 6),
-                                               note="cambio aceite opel 5w30", plate="1234ABC")
+        self.appt = make_appointment(cli, date(2026, 10, 6), "cambio aceite opel 5w30", plate="1234ABC")
         self.staff = get_user_model().objects.create_user("mecanico", password="x", is_staff=True,
                                                           is_superuser=True)
 
     def test_factura_con_iva_y_una_por_cita(self):
-        inv = services.complete_and_invoice(self.appt)
+        inv = complete_and_invoice(self.appt)
         self.assertEqual(inv.total, inv.subtotal + inv.iva)
-        self.assertEqual(services.complete_and_invoice(self.appt).number, inv.number)
+        self.assertEqual(complete_and_invoice(self.appt).number, inv.number)
         self.appt.refresh_from_db()
         self.assertEqual(self.appt.status, "hecha")
 
     def test_la_factura_exige_ser_personal_del_taller(self):
-        services.complete_and_invoice(self.appt)
+        complete_and_invoice(self.appt)
         url = f"/factura/{self.appt.pk}/"
         self.assertEqual(self.client.get(url).status_code, 302)  # sin login -> redirige
         self.client.force_login(self.staff)
@@ -288,7 +340,7 @@ class FacturaYAdminTests(OutboxMixin, TestCase):
     def test_estado_del_pedido(self):
         self.assertEqual(self.appt.order_state, "pedir_hoy" if self.appt.order_date <= date.today() else "por_pedir")
         self.assertEqual(self.appt.order_date, date(2026, 10, 5))
-        services.complete_and_invoice(self.appt)
+        complete_and_invoice(self.appt)
         self.appt.refresh_from_db()
         self.assertEqual(self.appt.order_state, "hecha")
 
@@ -298,8 +350,7 @@ class FacturaYAdminTests(OutboxMixin, TestCase):
         from datetime import timedelta
 
         cli, _ = Client.objects.get_or_create(name=name, defaults={"phone": "600 11 22 33"})
-        return Appointment.objects.create(client=cli, date=timezone.localdate() + timedelta(days=days),
-                                          note=note, plate=plate)
+        return make_appointment(cli, timezone.localdate() + timedelta(days=days), note, plate=plate)
 
     def test_pedido_revisable_edita_y_envia(self):
         a = self._future()
@@ -327,7 +378,7 @@ class FacturaYAdminTests(OutboxMixin, TestCase):
                 raise RuntimeError("proveedor caído")
 
         self.client.force_login(self.staff)
-        with mock.patch("taller.services.get_supplier", return_value=Broken()):
+        with mock.patch("taller.container.parts_supplier", return_value=Broken()):
             self.client.post(f"/citas/{a.pk}/pedir/")
         a.refresh_from_db()
         self.assertFalse(a.ordered)
@@ -367,7 +418,7 @@ class FacturaYAdminTests(OutboxMixin, TestCase):
         self.assertEqual(a.date, new_day)
         self.assertEqual(len(a.parts), 1)
         rem = Reminder.objects.get(appointment=a)
-        self.assertEqual(rem.send_on, services.add_months(new_day, 6) - __import__("datetime").timedelta(days=7))
+        self.assertEqual(rem.send_on, business_calendar.add_months(new_day, 6) - __import__("datetime").timedelta(days=7))
 
     def test_historial_y_buscador_por_matricula(self):
         self.client.force_login(self.staff)
@@ -398,15 +449,15 @@ class FacturaYAdminTests(OutboxMixin, TestCase):
         page = self.client.get("/tarifas/")
         self.assertContains(page, "cambio de aceite")
         self.assertNotContains(page, "filtro de aceite")  # los recambios no tienen precio
-        self.assertEqual(services.labor_price("cambio de aceite"), Decimal("45.00"))
-        self.assertEqual(services.labor_price("Cambio de aceite y filtro"), Decimal("45.00"))
+        self.assertEqual(labor_price("cambio de aceite"), Decimal("45.00"))
+        self.assertEqual(labor_price("Cambio de aceite y filtro"), Decimal("45.00"))
         bad = self.client.post("/tarifas/", {"p_name": ["ITV"], "p_price": ["abc"]})
         self.assertContains(bad, "Revisa el precio")
         self.client.post("/tarifas/", {"p_name": ["ITV", "cambio de aceite"], "p_price": ["32,5", ""],
                                        "new_name": "alineación", "new_price": "50"})
-        self.assertEqual(services.labor_price("ITV"), Decimal("32.50"))
-        self.assertIsNone(services.labor_price("cambio de aceite"))  # precio vacío = sin tarifa
-        self.assertEqual(services.labor_price("alineación"), Decimal("50.00"))
+        self.assertEqual(labor_price("ITV"), Decimal("32.50"))
+        self.assertIsNone(labor_price("cambio de aceite"))  # precio vacío = sin tarifa
+        self.assertEqual(labor_price("alineación"), Decimal("50.00"))
 
     def test_facturar_con_precios_de_recambios_escritos_a_mano(self):
         self.client.force_login(self.staff)
@@ -426,10 +477,10 @@ class FacturaYAdminTests(OutboxMixin, TestCase):
         self.assertEqual(self.client.get(url).status_code, 302)  # ya facturada: va a la factura
 
     def test_factura_sin_precios_no_inventa_precios_de_recambios(self):
-        inv = services.complete_and_invoice(self.appt)
+        inv = complete_and_invoice(self.appt)
         parts = [l for l in inv.lines if not l["concept"].startswith("Mano de obra")]
         self.assertTrue(all(l["unit_price"] == "0.00" for l in parts))
-        self.assertEqual(inv.subtotal, services.labor_price(self.appt.service))
+        self.assertEqual(inv.subtotal, labor_price(self.appt.service))
 
     def test_filtros_nombrados_y_sin_viscosidad_inventada(self):
         r = parse_note("cambio aceite y filtros de aire aceite y gasolina", use_llm=False)
@@ -447,7 +498,7 @@ class FacturaYAdminTests(OutboxMixin, TestCase):
         fake = {"service": "cambio de aceite", "vehicle": "Opel", "repeat_months": 12,
                 "parts": [{"name": "aceite motor", "spec": "5W30", "qty": 4, "unit": "L"}]}
         with mock.patch.dict(os.environ, {"TALLER_NO_LLM": "0"}), \
-                mock.patch("taller.parser._ask_ollama", return_value=fake):
+                mock.patch("taller.infrastructure.ollama_note_parser._ask_ollama", return_value=fake):
             data = self.client.get("/interpretar/", {"note": "lo que sea"}).json()
         self.assertTrue(data["engine"].startswith("ollama:"))
         self.assertEqual(data["parts"][0]["spec"], "5W30")
@@ -459,11 +510,11 @@ class FacturaYAdminTests(OutboxMixin, TestCase):
         import urllib.error
 
         with mock.patch.dict(os.environ, {"TALLER_NO_LLM": "0"}):
-            with mock.patch("taller.parser._ask_ollama", side_effect=urllib.error.URLError(ConnectionRefusedError())):
+            with mock.patch("taller.infrastructure.ollama_note_parser._ask_ollama", side_effect=urllib.error.URLError(ConnectionRefusedError())):
                 self.assertIn("Ollama", parse_note("cambio aceite")["llm_error"])
-            with mock.patch("taller.parser._ask_ollama", side_effect=TimeoutError()):
+            with mock.patch("taller.infrastructure.ollama_note_parser._ask_ollama", side_effect=TimeoutError()):
                 self.assertIn("tardó", parse_note("cambio aceite")["llm_error"])
-            with mock.patch("taller.parser._ask_ollama", side_effect=ValueError("x")):
+            with mock.patch("taller.infrastructure.ollama_note_parser._ask_ollama", side_effect=ValueError("x")):
                 self.assertIn("válida", parse_note("cambio aceite")["llm_error"])
         self.assertIn("desactivada", parse_note("cambio aceite")["llm_error"])
         self.assertEqual(parse_note("cambio aceite", use_llm=False)["llm_error"], "")
@@ -478,7 +529,7 @@ class FacturaYAdminTests(OutboxMixin, TestCase):
         self.assertEqual(data["vehicle"], "Ford Focus")
 
     def test_limpieza_de_lo_que_devuelve_gemma(self):
-        from .parser import _clean_parts, _clean_vehicle
+        from taller.domain.note_cleaning import clean_parts as _clean_parts, clean_vehicle as _clean_vehicle
 
         self.assertEqual(_clean_vehicle("Vehículo Desconocido"), "")
         parts = _clean_parts([
@@ -492,8 +543,6 @@ class FacturaYAdminTests(OutboxMixin, TestCase):
         self.assertEqual(parts[2]["spec"], "10W30")
 
     def test_el_prompt_lleva_el_coche_y_temperatura_cero(self):
-        from . import parser
-
         captured = {}
 
         class Resp:
@@ -511,10 +560,10 @@ class FacturaYAdminTests(OutboxMixin, TestCase):
             captured["body"] = json.loads(req.data)
             return Resp()
 
-        parser._CACHE.clear()
+        ollama_parser._CACHE.clear()
         with mock.patch.dict(os.environ, {"TALLER_NO_LLM": "0"}), \
-                mock.patch("taller.parser.urllib.request.urlopen", fake_urlopen):
-            r = parser.parse_note("cambio aceite y filtros", vehicle="Opel Corsa")
+                mock.patch("taller.infrastructure.ollama_note_parser.urllib.request.urlopen", fake_urlopen):
+            r = parse_note("cambio aceite y filtros", vehicle="Opel Corsa")
         self.assertIn("Vehículo: Opel Corsa", captured["body"]["prompt"])
         self.assertIn("Nota: cambio aceite y filtros", captured["body"]["prompt"])
         self.assertEqual(captured["body"]["options"]["temperature"], 0)
@@ -524,18 +573,16 @@ class FacturaYAdminTests(OutboxMixin, TestCase):
         self.assertTrue(r["engine"].startswith("ollama:"))
 
     def test_gemma_no_se_llama_dos_veces_con_la_misma_nota(self):
-        from . import parser
-
         calls = []
 
         def fake(note, vehicle="", timeout=None):
             calls.append(note)
             return {"service": "cambio de aceite", "vehicle": "", "repeat_months": 12, "parts": []}
 
-        parser._CACHE.clear()
+        ollama_parser._CACHE.clear()
         with mock.patch.dict(os.environ, {"TALLER_NO_LLM": "0"}), \
-                mock.patch("taller.parser._ask_ollama_uncached", fake):
-            parser.parse_note("cambio aceite raro", vehicle="Opel")
-            parser.parse_note("cambio aceite raro", vehicle="Opel")  # p. ej. al guardar tras la vista previa
-            parser.parse_note("cambio aceite raro", vehicle="Seat")
+                mock.patch("taller.infrastructure.ollama_note_parser._ask_ollama_uncached", fake):
+            parse_note("cambio aceite raro", vehicle="Opel")
+            parse_note("cambio aceite raro", vehicle="Opel")  # p. ej. al guardar tras la vista previa
+            parse_note("cambio aceite raro", vehicle="Seat")
         self.assertEqual(len(calls), 2)

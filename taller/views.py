@@ -1,24 +1,52 @@
-from datetime import date, timedelta
+"""Adaptador web: traduce peticiones HTTP a comandos/consultas de la capa de aplicación."""
 
-import re
+from datetime import date, timedelta
 from decimal import Decimal, InvalidOperation
+from io import StringIO
 
 from django.contrib import messages
-from django.core.management import call_command
 from django.contrib.auth.decorators import user_passes_test
-from django.db.models import Count, Q
-from django.http import HttpResponse, JsonResponse
-from django.shortcuts import get_object_or_404, redirect, render
+from django.core.management import call_command
+from django.http import Http404, HttpResponse, JsonResponse
+from django.shortcuts import redirect, render
 from django.urls import reverse
 from django.utils import timezone
 from django.utils.html import format_html
 from django.utils.http import url_has_allowed_host_and_scheme
 from django.views.decorators.http import require_POST
 
-from . import services
-from .forms import AppointmentForm, EditAppointmentForm
-from .models import Appointment, Client, Invoice, LaborRate, Reminder
-from .parser import parse_note
+from taller import container
+from taller.application.build_shopping_list.build_shopping_list_query import BuildShoppingListQuery
+from taller.application.complete_and_invoice_appointment.complete_and_invoice_appointment_command import (
+    CompleteAndInvoiceAppointmentCommand,
+)
+from taller.application.create_appointment.create_appointment_command import CreateAppointmentCommand
+from taller.application.edit_appointment.edit_appointment_command import EditAppointmentCommand
+from taller.application.find_appointment.find_appointment_query import FindAppointmentQuery
+from taller.application.find_clients.find_clients_query import FindClientsQuery
+from taller.application.find_home_board.find_home_board_query import FindHomeBoardQuery
+from taller.application.find_invoice.find_invoice_query import FindInvoiceQuery
+from taller.application.find_invoices.find_invoices_query import FindInvoicesQuery
+from taller.application.find_labor_price.find_labor_price_query import FindLaborPriceQuery
+from taller.application.find_labor_rates.find_labor_rates_query import FindLaborRatesQuery
+from taller.application.find_order_review.find_order_review_query import FindOrderReviewQuery
+from taller.application.find_plate_history.find_plate_history_query import FindPlateHistoryQuery
+from taller.application.find_week.find_week_query import FindWeekQuery
+from taller.application.interpret_note.interpret_note_query import InterpretNoteQuery
+from taller.application.order_appointment_parts.order_appointment_parts_command import (
+    OrderAppointmentPartsCommand,
+)
+from taller.application.review_parts_order.review_parts_order_command import ReviewPartsOrderCommand
+from taller.application.run_daily.run_daily_command import RunDailyCommand
+from taller.application.save_labor_rates.save_labor_rates_command import SaveLaborRatesCommand
+from taller.application.search_appointments.search_appointments_query import SearchAppointmentsQuery
+from taller.domain.business_calendar import next_business_day, previous_business_day
+from taller.domain.exceptions.appointment_not_found_exception import AppointmentNotFoundException
+from taller.domain.exceptions.invoice_not_found_exception import InvoiceNotFoundException
+from taller.domain.known_services import KNOWN_SERVICES  # noqa: F401  (se usa desde las plantillas/tests)
+from taller.domain.money import IVA
+
+from .forms import AppointmentForm, EditAppointmentForm, parts_from_post
 
 staff_required = user_passes_test(
     lambda u: u.is_active and u.is_staff, login_url="login"
@@ -33,22 +61,20 @@ def _back(request, fallback="home"):
     return redirect(target if ok else fallback)
 
 
+def _find_appointment_or_404(pk):
+    try:
+        return container.find_appointment_handler().handle(FindAppointmentQuery(appointment_id=pk))
+    except AppointmentNotFoundException:
+        raise Http404
+
+
 def _home_context(today, form=None):
+    board = container.find_home_board_handler().handle(FindHomeBoardQuery(today=today))
     tomorrow = today + timedelta(days=1)
-    todo = Appointment.objects.filter(status="pendiente").select_related("client")
-    late = todo.filter(date__lt=today)
     return {
         "today": today, "tomorrow": tomorrow,
         "form": form or AppointmentForm(initial={"date": tomorrow}),
-        "today_list": Appointment.objects.filter(date=today).select_related("client"),
-        "tomorrow_list": Appointment.objects.filter(date=tomorrow).select_related("client"),
-        "late_list": late,
-        "to_order": [a for a in todo.filter(ordered=False, date__gte=today)
-                     if a.order_state == "pedir_hoy"],
-        "failed": todo.filter(ordered=False).exclude(order_error="").count(),
-        "reminders": Reminder.objects.filter(sent=False).select_related("client")[:5],
-        "clients": Client.objects.values_list("name", flat=True),
-        "tab": "home",
+        **board, "tab": "home",
     }
 
 
@@ -64,37 +90,21 @@ def week(request):
         ref = date.fromisoformat(request.GET.get("d", ""))
     except ValueError:
         ref = today
-    start = ref - timedelta(days=ref.weekday())
-    days = []
-    for i in range(7):
-        d = start + timedelta(days=i)
-        days.append({
-            "date": d, "is_today": d == today, "weekend": d.weekday() >= 5,
-            "items": Appointment.objects.filter(date=d).select_related("client"),
-        })
-    return render(request, "taller/week.html", {
-        "days": days, "start": start, "end": start + timedelta(days=6), "today": today,
-        "prev": start - timedelta(days=7), "next": start + timedelta(days=7),
-        "tab": "week",
-    })
+    data = container.find_week_handler().handle(FindWeekQuery(reference=ref, today=today))
+    return render(request, "taller/week.html", {**data, "today": today, "tab": "week"})
 
 
 @staff_required
 def clients(request):
     q = request.GET.get("q", "").strip()
-    qs = Client.objects.annotate(
-        visits=Count("appointments"),
-        waiting=Count("reminder", filter=Q(reminder__sent=False)),
-    )
-    if q:
-        qs = qs.filter(Q(name__icontains=q) | Q(phone__icontains=q))
-    return render(request, "taller/clients.html", {"clients": qs, "q": q, "tab": "clients"})
+    found = container.find_clients_handler().handle(FindClientsQuery(text=q))
+    return render(request, "taller/clients.html", {"clients": found, "q": q, "tab": "clients"})
 
 
 @staff_required
 def invoices(request):
-    qs = Invoice.objects.select_related("appointment__client")
-    return render(request, "taller/invoices.html", {"invoices": qs, "tab": "invoices"})
+    found = container.find_invoices_handler().handle(FindInvoicesQuery())
+    return render(request, "taller/invoices.html", {"invoices": found, "tab": "invoices"})
 
 
 @staff_required
@@ -106,16 +116,10 @@ def appointment_create(request):
         ctx = _home_context(today, form)
         return render(request, "taller/home.html", ctx, status=400)
     data = form.cleaned_data
-    client = Client.objects.filter(name__iexact=data["client_name"]).first()
-    if client is None:
-        client = Client.objects.create(name=data["client_name"], phone=data["phone"])
-    elif data["phone"] and not client.phone:
-        client.phone = data["phone"]
-        client.save(update_fields=["phone"])
-    appt = Appointment.objects.create(
-        client=client, date=data["date"], plate=data["plate"], note=data["note"],
-        vehicle=data["vehicle"],
-    )
+    appt = container.create_appointment_handler().handle(CreateAppointmentCommand(
+        date=data["date"], client_name=data["client_name"], note=data["note"],
+        phone=data["phone"], plate=data["plate"], vehicle=data["vehicle"],
+    ))
     extra = f" Aviso programado cada {appt.repeat_months} meses." if appt.repeat_months else ""
     messages.success(request, f"Cita apuntada: {appt.service or appt.note}.{extra}")
     if data["date"] in (today, today + timedelta(days=1)):
@@ -126,12 +130,12 @@ def appointment_create(request):
 @staff_required
 @require_POST
 def appointment_order(request, pk):
-    appt = get_object_or_404(Appointment, pk=pk)
+    appt = _find_appointment_or_404(pk)
     if appt.ordered or not appt.parts:
         messages.info(request, "Esta cita no tiene recambios pendientes de pedir.")
     else:
         try:
-            services.order_parts(appt)
+            container.order_appointment_parts_handler().handle(OrderAppointmentPartsCommand(appointment_id=pk))
             messages.success(request, f"Recambios pedidos para {appt.client.name}.")
         except Exception as exc:
             messages.error(request, f"No se pudo hacer el pedido: {exc}")
@@ -141,11 +145,11 @@ def appointment_order(request, pk):
 @staff_required
 @require_POST
 def appointment_done(request, pk):
-    appt = get_object_or_404(Appointment, pk=pk)
-    inv = services.complete_and_invoice(appt)
+    _find_appointment_or_404(pk)
+    inv = container.complete_and_invoice_handler().handle(CompleteAndInvoiceAppointmentCommand(appointment_id=pk))
     messages.success(request, format_html(
         'Cita hecha. Factura {} lista: <a href="{}" target="_blank">abrir e imprimir</a>.',
-        inv.number, reverse("invoice", args=[appt.pk]),
+        inv.number, reverse("invoice", args=[pk]),
     ))
     return _back(request)
 
@@ -153,7 +157,7 @@ def appointment_done(request, pk):
 @staff_required
 @require_POST
 def run_daily_view(request):
-    report = services.run_daily()
+    report = container.run_daily_handler().handle(RunDailyCommand())
     msg = f"Pedidos enviados: {len(report['orders'])}. Avisos enviados: {len(report['reminders'])}."
     messages.success(request, msg)
     for err in report["errors"]:
@@ -163,68 +167,52 @@ def run_daily_view(request):
 
 @staff_required
 def interpret(request):
-    parsed = parse_note(request.GET.get("note", ""), vehicle=request.GET.get("vehicle", ""))  # con Gemma si Ollama está activo
+    parsed = container.interpret_note_handler().handle(InterpretNoteQuery(
+        note=request.GET.get("note", ""), vehicle=request.GET.get("vehicle", "")))  # con Gemma si Ollama está activo
     return JsonResponse({
-        "service": parsed["service"], "vehicle": parsed["vehicle"],
-        "repeat_months": parsed["repeat_months"], "parts": parsed["parts"],
-        "engine": parsed["engine"], "llm_error": parsed.get("llm_error", ""),
+        "service": parsed.service, "vehicle": parsed.vehicle,
+        "repeat_months": parsed.repeat_months, "parts": parsed.parts,
+        "engine": parsed.engine, "llm_error": parsed.llm_error,
     })
 
 
 @staff_required
 def invoice(request, appointment_id):
-    inv = get_object_or_404(
-        Invoice.objects.select_related("appointment__client"), appointment_id=appointment_id
-    )
+    try:
+        inv = container.find_invoice_handler().handle(FindInvoiceQuery(appointment_id=appointment_id))
+    except InvoiceNotFoundException:
+        raise Http404
     return render(request, "taller/invoice.html", {"inv": inv, "appt": inv.appointment})
 
 
 # ---------------------------------------------------------------- pedido revisable
-
-def _norm_plate(text):
-    return re.sub(r"[^A-Z0-9]", "", (text or "").upper())
-
 
 @staff_required
 def order_review(request):
     """Recambios por pedir, editables antes de enviarlos al proveedor."""
     today = timezone.localdate()
     if request.method == "POST":
-        pending = {a.pk: a for a in Appointment.objects.filter(
-            pk__in=[int(i) for i in request.POST.getlist("ids") if i.isdigit()],
-            status="pendiente", ordered=False)}
-        for pk, appt in pending.items():
-            parts = services.parts_from_post(request.POST, pk)
-            if parts != appt.parts:
-                appt.parts = parts
-                Appointment.objects.filter(pk=pk).update(parts=parts)
-        if request.POST.get("do") == "send":
-            sent = 0
-            for raw in request.POST.getlist("send"):
-                appt = pending.get(int(raw)) if raw.isdigit() else None
-                if appt is None or not appt.parts:
-                    continue
-                try:
-                    services.order_parts(appt)
-                    sent += 1
-                except Exception as exc:
-                    messages.error(request, f"{appt.client.name}: no se pudo pedir ({exc}).")
-            if sent:
-                messages.success(request, f"Pedidos enviados: {sent}.")
+        ids = tuple(int(i) for i in request.POST.getlist("ids") if i.isdigit())
+        do_send = request.POST.get("do") == "send"
+        result = container.review_parts_order_handler().handle(ReviewPartsOrderCommand(
+            appointment_ids=ids,
+            parts_by_appointment={pk: parts_from_post(request.POST, pk) for pk in ids},
+            send_ids=tuple(int(r) for r in request.POST.getlist("send") if r.isdigit()),
+            send=do_send,
+        ))
+        if do_send:
+            for err in result["errors"]:
+                messages.error(request, err)
+            if result["sent"]:
+                messages.success(request, f"Pedidos enviados: {result['sent']}.")
             else:
                 messages.info(request, "No había nada seleccionado para enviar.")
         else:
             messages.success(request, "Cambios guardados.")
         return redirect("order_review")
-    appts = Appointment.objects.filter(
-        status="pendiente", ordered=False, date__gte=today, date__lte=today + timedelta(days=7)
-    ).select_related("client")
-    rows = [{"a": a, "checked": bool(a.parts) and a.order_state in ("pedir_hoy", "fallo")}
-            for a in appts]
-    rows.sort(key=lambda r: (not r["checked"], r["a"].date))
+    rows = container.find_order_review_handler().handle(FindOrderReviewQuery(today=today))
     return render(request, "taller/order_review.html", {
-        "rows": rows, "today": today,
-        "shopping_day": services.next_business_day(today), "tab": "order",
+        "rows": rows, "today": today, "shopping_day": next_business_day(today), "tab": "order",
     })
 
 
@@ -235,12 +223,11 @@ def shopping(request):
     try:
         day = date.fromisoformat(request.GET.get("d", ""))
     except ValueError:
-        day = services.next_business_day(today)
-    appts = list(Appointment.objects.filter(date=day, status="pendiente").select_related("client"))
+        day = next_business_day(today)
+    data = container.build_shopping_list_handler().handle(BuildShoppingListQuery(day=day))
     return render(request, "taller/shopping.html", {
-        "day": day, "rows": services.shopping_list(appts), "appts": appts,
-        "prev": services.previous_business_day(day), "next": services.next_business_day(day),
-        "tab": "order",
+        "day": day, "rows": data["rows"], "appts": data["appointments"],
+        "prev": previous_business_day(day), "next": next_business_day(day), "tab": "order",
     })
 
 
@@ -248,31 +235,18 @@ def shopping(request):
 
 @staff_required
 def appointment_edit(request, pk):
-    appt = get_object_or_404(Appointment.objects.select_related("client"), pk=pk)
+    appt = _find_appointment_or_404(pk)
     if request.method == "POST":
         form = EditAppointmentForm(request.POST)
         if form.is_valid():
             d = form.cleaned_data
-            client = Client.objects.filter(name__iexact=d["client_name"]).first() \
-                or Client.objects.create(name=d["client_name"])
-            if d["phone"] and client.phone != d["phone"]:
-                client.phone = d["phone"]
-                client.save(update_fields=["phone"])
-            old = (appt.date, appt.repeat_months)
             old_parts = appt.parts
-            appt.client, appt.date, appt.plate, appt.note = client, d["date"], d["plate"], d["note"]
-            appt.vehicle = d["vehicle"]
-            if d["reinterpret"]:
-                appt.interpret_note()
-            else:
-                appt.service = d["service"]
-                appt.repeat_months = d["repeat_months"] or 0
-                appt.parts = services.parts_from_post(request.POST, appt.pk)
-            appt.save()
-            if (appt.date, appt.repeat_months) != old:
-                Reminder.objects.filter(appointment=appt, sent=False).delete()
-                if appt.repeat_months:
-                    services.schedule_reminder(appt)
+            appt = container.edit_appointment_handler().handle(EditAppointmentCommand(
+                appointment_id=pk, date=d["date"], client_name=d["client_name"], note=d["note"],
+                phone=d["phone"], plate=d["plate"], vehicle=d["vehicle"], service=d["service"],
+                repeat_months=d["repeat_months"] or 0, parts=tuple(parts_from_post(request.POST, pk)),
+                reinterpret=d["reinterpret"],
+            ))
             if appt.ordered and appt.parts != old_parts:
                 messages.info(request, "Los recambios ya estaban pedidos: el cambio no se ha reenviado al proveedor.")
             messages.success(request, "Cita guardada.")
@@ -290,37 +264,14 @@ def appointment_edit(request, pk):
 
 @staff_required
 def history(request):
-    plate = _norm_plate(request.GET.get("plate", ""))
-    if len(plate) < 4:
-        return JsonResponse({"found": False})
-    rows = [a for a in Appointment.objects.exclude(plate="").select_related("client").order_by("-date")
-            if _norm_plate(a.plate) == plate][:5]
-    if not rows:
-        return JsonResponse({"found": False})
-    last = rows[0]
-    return JsonResponse({
-        "found": True, "client": last.client.name, "phone": last.client.phone,
-        "vehicle": last.vehicle,
-        "visits": [{
-            "date": a.date.strftime("%d/%m/%Y"), "service": a.service or a.note,
-            "parts": ", ".join(f"{p['qty']} {p['name']} {p.get('spec', '')}".strip() for p in a.parts),
-        } for a in rows],
-    })
+    return JsonResponse(container.find_plate_history_handler().handle(
+        FindPlateHistoryQuery(plate=request.GET.get("plate", ""))))
 
 
 @staff_required
 def search(request):
     q = request.GET.get("q", "").strip()
-    found = []
-    if q:
-        norm = _norm_plate(q)
-        cond = (Q(note__icontains=q) | Q(plate__icontains=q) | Q(client__name__icontains=q)
-                | Q(vehicle__icontains=q) | Q(service__icontains=q) | Q(client__phone__icontains=q))
-        found = list(Appointment.objects.filter(cond).select_related("client").order_by("-date")[:60])
-        if norm and len(norm) >= 4:  # "1234 abc" también encuentra "1234ABC"
-            extra = [a for a in Appointment.objects.exclude(plate="").select_related("client")
-                     if norm in _norm_plate(a.plate) and a not in found]
-            found = sorted(found + extra, key=lambda a: a.date, reverse=True)[:60]
+    found = container.search_appointments_handler().handle(SearchAppointmentsQuery(text=q))
     return render(request, "taller/search.html", {"q": q, "found": found, "tab": ""})
 
 
@@ -328,8 +279,6 @@ def search(request):
 
 @staff_required
 def backup(request):
-    from io import StringIO
-
     out = StringIO()
     call_command("dumpdata", "taller", indent=2, stdout=out)
     resp = HttpResponse(out.getvalue(), content_type="application/json; charset=utf-8")
@@ -343,6 +292,10 @@ def _parse_price(text):
     except InvalidOperation:
         return None
     return value.quantize(Decimal("0.01")) if 0 <= value < 100000 else None
+
+
+def _price_text(value):
+    return f"{value:.2f}".replace(".", ",") if value is not None else ""
 
 
 @staff_required
@@ -367,32 +320,27 @@ def prices(request):
         if bad:
             messages.error(request, "Revisa el precio de: " + ", ".join(bad) + ". Usa números, por ejemplo 45 o 37,50.")
         else:
-            for name, value in todo:
-                if value is None:
-                    LaborRate.objects.filter(service=name).delete()
-                else:
-                    LaborRate.objects.update_or_create(service=name, defaults={"price": value})
+            container.save_labor_rates_handler().handle(SaveLaborRatesCommand(entries=tuple(todo)))
             messages.success(request, "Tarifas guardadas.")
             return redirect("prices")
-    saved = {r.service: r.price for r in LaborRate.objects.all()}
-    names = list(services.KNOWN_SERVICES) + sorted(set(saved) - set(services.KNOWN_SERVICES), key=str.lower)
-    rows = [{"name": n, "price": f"{saved[n]:.2f}".replace(".", ",") if n in saved else ""} for n in names]
-    return render(request, "taller/prices.html", {"rows": rows, "iva": int(services.IVA * 100), "tab": "prices"})
+    rows = [{"name": r["name"], "price": _price_text(r["price"])}
+            for r in container.find_labor_rates_handler().handle(FindLaborRatesQuery())]
+    return render(request, "taller/prices.html", {"rows": rows, "iva": int(IVA * 100), "tab": "prices"})
 
 
 @staff_required
 def appointment_invoice(request, pk):
     """Pantalla para facturar: precio de cada recambio (según el albarán) y mano de obra."""
-    appt = get_object_or_404(Appointment.objects.select_related("client"), pk=pk)
-    if hasattr(appt, "invoice"):
-        return redirect("invoice", appt.pk)
+    appt = _find_appointment_or_404(pk)
+    if container.find_invoice_handler().find_or_none(FindInvoiceQuery(appointment_id=pk)):
+        return redirect("invoice", pk)
     post = request.POST if request.method == "POST" else None
-    labor_default = services.labor_price(appt.service)
+    labor_default = container.find_labor_price_handler().handle(FindLaborPriceQuery(service=appt.service))
     rows = [{"i": i, "p": p, "price": post.get(f"price_{i}", "") if post else ""}
             for i, p in enumerate(appt.parts)]
     ctx = {
-        "a": appt, "rows": rows, "iva": services.IVA, "iva_pct": int(services.IVA * 100), "tab": "invoices",
-        "labor": post.get("labor", "") if post else (f"{labor_default:.2f}".replace(".", ",") if labor_default is not None else ""),
+        "a": appt, "rows": rows, "iva": IVA, "iva_pct": int(IVA * 100), "tab": "invoices",
+        "labor": post.get("labor", "") if post else _price_text(labor_default),
         "extra_concept": post.get("extra_concept", "") if post else "",
         "extra_price": post.get("extra_price", "") if post else "",
     }
@@ -419,9 +367,10 @@ def appointment_invoice(request, pk):
     if bad:
         messages.error(request, "Revisa los importes de: " + ", ".join(bad) + ". Usa números, por ejemplo 12,50.")
         return render(request, "taller/invoice_form.html", ctx, status=400)
-    inv = services.complete_and_invoice(appt, part_prices=prices_, labor=labor, extras=extras)
+    inv = container.complete_and_invoice_handler().handle(CompleteAndInvoiceAppointmentCommand(
+        appointment_id=pk, part_prices=tuple(prices_), labor=labor, extras=tuple(extras)))
     messages.success(request, format_html(
         'Cita hecha. Factura {} lista: <a href="{}" target="_blank">abrir e imprimir</a>.',
-        inv.number, reverse("invoice", args=[appt.pk]),
+        inv.number, reverse("invoice", args=[pk]),
     ))
     return redirect("home")

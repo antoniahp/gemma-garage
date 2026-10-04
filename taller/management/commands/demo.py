@@ -14,7 +14,11 @@ from django.core.management import call_command
 from django.core.management.base import BaseCommand, CommandError
 from django.utils import timezone
 
-from taller import services
+from taller import container
+from taller.application.complete_and_invoice_appointment.complete_and_invoice_appointment_command import (
+    CompleteAndInvoiceAppointmentCommand,
+)
+from taller.application.schedule_reminder.schedule_reminder_command import ScheduleReminderCommand
 from taller.models import Appointment, Client, Invoice, Order, Reminder
 
 
@@ -101,9 +105,12 @@ class Command(BaseCommand):
             c[name] = Client.objects.create(name=name, phone=phone, telegram_chat_id=chat)
 
         def cita(client, day, plate, vehicle, note, service, parts, months=0, **extra):
-            return Appointment.objects.create(
+            appt = Appointment.objects.create(
                 client=c[client], date=day, plate=plate, vehicle=vehicle, note=note,
                 service=service, parts=parts, repeat_months=months, **extra)
+            if months:
+                container.schedule_reminder_handler().handle(ScheduleReminderCommand(appointment_id=appt.pk))
+            return appt
 
         # ---- ya hechas y facturadas (precios de recambios escritos como del albarán)
         done = [
@@ -121,7 +128,8 @@ class Command(BaseCommand):
             appt = cita(client, day, plate, vehicle, note, service, parts, months, ordered=True)
             Order.objects.create(appointment=appt, supplier="email", parts=parts,
                                  detail="enviado por correo al distribuidor")
-            inv = services.complete_and_invoice(appt, part_prices=prices, labor=labor)
+            inv = container.complete_and_invoice_handler().handle(CompleteAndInvoiceAppointmentCommand(
+                appointment_id=appt.pk, part_prices=tuple(prices), labor=labor))
             Invoice.objects.filter(pk=inv.pk).update(created_at=day)
 
         # ---- próximos días
