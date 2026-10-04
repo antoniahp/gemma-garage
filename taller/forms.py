@@ -1,6 +1,6 @@
 from django import forms
 
-from .models import Appointment
+from taller.domain.parts import parse_qty
 
 
 class AppointmentForm(forms.Form):
@@ -40,3 +40,25 @@ class EditAppointmentForm(AppointmentForm):
         label="Volver a interpretar la nota (cambia trabajo, vehículo, recambios y aviso)",
         required=False,
     )
+
+
+def parts_from_post(post, pk):
+    """Lee las líneas de recambios de un formulario (campos name_<pk>, spec_<pk>, ...).
+
+    Las líneas sin nombre se descartan; así se borra una línea vaciándola.
+    """
+    names, specs = post.getlist(f"name_{pk}"), post.getlist(f"spec_{pk}")
+    qtys, units = post.getlist(f"qty_{pk}"), post.getlist(f"unit_{pk}")
+    parts = []
+    for i, name in enumerate(names):
+        name = " ".join(name.split())
+        if not name:
+            continue
+        qty = parse_qty(qtys[i]) if i < len(qtys) else 1
+        parts.append({
+            "name": name,
+            "spec": " ".join(specs[i].split()) if i < len(specs) else "",
+            "qty": qty or 1,
+            "unit": (units[i].strip() if i < len(units) else "") or "ud",
+        })
+    return parts

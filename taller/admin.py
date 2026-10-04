@@ -2,7 +2,17 @@ from django.contrib import admin, messages
 from django.urls import reverse
 from django.utils.html import format_html
 
-from . import services
+from taller import container
+from taller.application.complete_and_invoice_appointment.complete_and_invoice_appointment_command import (
+    CompleteAndInvoiceAppointmentCommand,
+)
+from taller.application.interpret_note.interpret_note_query import InterpretNoteQuery
+from taller.application.order_appointment_parts.order_appointment_parts_command import (
+    OrderAppointmentPartsCommand,
+)
+from taller.application.schedule_reminder.schedule_reminder_command import ScheduleReminderCommand
+from taller.domain.parts import describe_parts
+
 from .models import Appointment, Client, Invoice, LaborRate, Order, Reminder
 
 admin.site.site_header = "Agenda del taller"
@@ -52,9 +62,21 @@ class AppointmentAdmin(admin.ModelAdmin):
         ("Estado", {"fields": ("status", "ordered")}),
     )
 
+    def save_model(self, request, obj, form, change):
+        """Al crear una cita desde el admin, la nota se interpreta y se programa el aviso anual."""
+        creating = not change
+        if not obj.service and obj.note:
+            parsed = container.interpret_note_handler().handle(
+                InterpretNoteQuery(note=obj.note, vehicle=obj.vehicle))
+            obj.service, obj.vehicle = parsed.service, parsed.vehicle
+            obj.parts, obj.repeat_months = parsed.parts, parsed.repeat_months
+        super().save_model(request, obj, form, change)
+        if creating and obj.repeat_months:
+            container.schedule_reminder_handler().handle(ScheduleReminderCommand(appointment_id=obj.pk))
+
     @admin.display(description="Recambios")
     def recambios(self, obj):
-        return ", ".join(f"{p['qty']} {p['name']} {p.get('spec', '')}".strip() for p in obj.parts) or "—"
+        return describe_parts(obj.parts) or "—"
 
     @admin.display(description="Factura")
     def factura(self, obj):
@@ -70,7 +92,8 @@ class AppointmentAdmin(admin.ModelAdmin):
             if not appt.parts:
                 continue
             try:
-                services.order_parts(appt)
+                container.order_appointment_parts_handler().handle(
+                    OrderAppointmentPartsCommand(appointment_id=appt.pk))
                 done += 1
             except Exception as exc:
                 self.message_user(request, f"Cita {appt.pk}: {exc}", messages.ERROR)
@@ -79,7 +102,8 @@ class AppointmentAdmin(admin.ModelAdmin):
     @admin.action(description="Marcar como hechas y generar factura")
     def hecha_y_facturar(self, request, queryset):
         for appt in queryset:
-            services.complete_and_invoice(appt)
+            container.complete_and_invoice_handler().handle(
+                CompleteAndInvoiceAppointmentCommand(appointment_id=appt.pk))
         self.message_user(request, f"Facturas generadas: {queryset.count()}")
 
 

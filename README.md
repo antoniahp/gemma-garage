@@ -1,80 +1,82 @@
 # Gemma Garage
 
-*Agenda local para un taller mecánico.*
+**English** · [Español](README.es.md)
 
-Una agenda para un taller mecánico que se encarga sola del papeleo:
+*A local-first appointment book for a car workshop. A local Gemma model reads the mechanic's notes and does the paperwork.*
 
-1. **Apuntas la cita como en papel**: `cambio aceite motor opel aceite 5w30`.
-2. Un **modelo de IA abierto y local** (Gemma, vía Ollama) entiende la nota: servicio, marca, recambios y cada cuánto se repite.
-3. **El día laborable antes de la cita, pide los recambios** al proveedor (el lunes para el martes; el viernes para el lunes).
-4. Si el servicio se repite (ITV, aceite: cada 12 meses), **avisa al cliente por Telegram** una semana antes de que se cumpla el año.
-5. Al terminar, **genera la factura** imprimible con IVA.
+Built for a mechanic who keeps his jobs as scribbles and loses evenings phoning parts distributors and chasing customers:
 
-Tiene un **frontal propio** (pantallas *Hoy*, *Semana*, *Clientes* y *Facturas*, también en el móvil) y, para lo avanzado, el **admin de Django** en `/admin/`. Base de datos **Postgres**.
+1. **You write the job as on paper**: `cambio aceite motor opel aceite 5w30`.
+2. An **open-weight model running locally** (Gemma, through Ollama) understands the note: job, car, parts and how often it repeats.
+3. **The business day before the appointment, the parts are ordered** from the distributor (Monday for Tuesday; Friday for Monday).
+4. If the job repeats (ITV, oil: every 12 months), **the customer gets a Telegram reminder** a week before the year is up.
+5. When the job is done, a printable **invoice with VAT** is generated.
 
-> *English summary:* a local-first appointment book for a car workshop, built with Django (admin as the UI) and Postgres. A local open-weight model (Gemma via Ollama) parses free-text notes into parts and recurrence; parts are ordered automatically the business day before; yearly reminders go out through a free Telegram bot; invoices are generated. No cloud AI: customer data stays on the machine. Falls back to simple rules if no model is running.
+It has its own **web front end** (*Today*, *Week*, *Customers* and *Invoices* screens, also on the phone) and, for the advanced bits, the **Django admin** at `/admin/`. Database: **Postgres** (SQLite fallback). The interface is in Spanish, because that is what the mechanic reads.
 
-## Así se ve
+No cloud AI: customer names, plates and phone numbers never leave the machine. If no model is running, simple rules take over for the common jobs, so the workshop never stops.
 
-Vídeo completo: [`docs/media/taller-demo.mp4`](docs/media/taller-demo.mp4). Todas las capturas son de los datos de ejemplo (clientes y matrículas inventados).
+## What it looks like
 
-**1. Apuntar una cita.** Escribes la matrícula y reconoce al cliente que vuelve; escribes la nota como la dirías y el panel *Lo que he entendido* muestra el trabajo, el coche, los recambios y el aviso anual.
+Full video: [`docs/media/taller-demo.mp4`](docs/media/taller-demo.mp4). All screenshots use sample data (made-up customers and plates).
 
-![Apuntar una cita](docs/media/01-nueva-cita.gif)
+**1. New appointment.** Type a plate and it recognises the returning customer; write the note the way you'd say it and the *Lo que he entendido* ("what I understood") panel shows the job, the car, the parts and the yearly reminder.
 
-Con Gemma activo, el panel lo dice (la captura es real, con `gemma3` en local):
+![New appointment](docs/media/01-nueva-cita.gif)
 
-![Entendido con Gemma](docs/media/gemma-interpretation.png)
+With Gemma running, the panel says so (this is a real capture, `gemma3` running locally):
 
-**2. Revisar y pedir los recambios**, con aviso de «Pidiendo recambios…» mientras se envía. Si el distribuidor falla, la cita queda marcada para reintentar.
+![Understood with Gemma](docs/media/gemma-interpretation.png)
 
-![Pedido](docs/media/02-pedido.gif)
+**2. Review and order the parts**, with a "Pidiendo recambios…" (ordering parts) spinner while it goes out. If the distributor fails, the appointment is flagged so you can retry.
 
-**3. Lista de compra del día**
+![Order](docs/media/02-pedido.gif)
 
-![Lista de compra](docs/media/03-compra.gif)
+**3. Shopping list for the day**
 
-**4. Hecha y facturar.** Escribes los precios de los recambios del albarán (no se guardan: dependen del distribuidor); la mano de obra sale de tus tarifas; el total se actualiza en vivo.
+![Shopping list](docs/media/03-compra.gif)
 
-![Factura](docs/media/04-factura.gif)
+**4. Done → invoice.** Type the part prices from the delivery note (they are never stored: they depend on the distributor); labour comes from your tariffs; the total updates live.
 
-**5. Tarifas, semana, búsqueda y clientes**
+![Invoice](docs/media/04-factura.gif)
 
-![Tarifas y búsqueda](docs/media/05-tarifas-busqueda.gif)
+**5. Tariffs, week, search and customers**
 
-**6. En el móvil**
+![Tariffs and search](docs/media/05-tarifas-busqueda.gif)
 
-<img src="docs/media/06-movil.gif" width="260" alt="Vista móvil">
+**6. On the phone**
 
-> Las capturas y GIFs se generan con `docs/record_demo.py`. Si Ollama está activo, el panel sale verde (Gemma); si no, gris (reglas simples). El script graba lo que ve, no retoca nada.
+<img src="docs/media/06-movil.gif" width="260" alt="Mobile view">
 
-## Probarlo con datos de ejemplo
+> The screenshots and GIFs are generated by `docs/record_demo.py`. With Ollama running, the panel is green (Gemma); without it, grey (simple rules). The script records what it sees and retouches nothing.
+
+## Try it with sample data
 
 ```bash
-python manage.py demo            # solo si la base está vacía
-python manage.py demo --reset    # borra clientes, citas y facturas (antes guarda una copia .json)
+python manage.py demo            # only if the database is empty
+python manage.py demo --reset    # wipes customers, appointments and invoices (saves a .json backup first)
 ```
 
-Para regenerar las capturas y vídeos con Gemma (Ollama encendido, entorno activado):
+To regenerate the screenshots and videos with Gemma (Ollama running, virtualenv active; needs `ffmpeg`):
 
 ```bash
 bash docs/grabar.sh
 ```
 
-Pone los datos de ejemplo (guardando antes una copia de los tuyos), arranca el servidor solo, graba y lo para. Si Gemma no responde, se detiene en vez de grabar con las reglas simples (`ALLOW_RULES=1` para forzarlo).
+It loads the sample data (backing up yours first), starts the server by itself, records and stops it. If Gemma doesn't answer it stops instead of recording with the simple rules (`ALLOW_RULES=1` forces it).
 
-## Arrancar desde cero
+## Getting started
 
-Necesitas: **Python 3.10+**, **Git** y **Docker** (para Postgres). Ollama es opcional.
+You need: **Python 3.10+**, **Git** and **Docker** (for Postgres). Ollama is optional.
 
-**1. Descarga el proyecto y entra en la carpeta**
+**1. Clone the project**
 
 ```bash
 git clone https://github.com/antoniahp/gemma-garage.git
 cd gemma-garage
 ```
 
-**2. Crea un entorno de Python e instala las dependencias**
+**2. Create a virtualenv and install the dependencies**
 
 ```bash
 python3 -m venv .venv
@@ -82,109 +84,129 @@ source .venv/bin/activate          # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-**3. Arranca Postgres**
+**3. Start Postgres**
 
 ```bash
 docker compose up -d
 ```
 
-**4. Carga la configuración**
+**4. Load the configuration**
 
 ```bash
 cp .env.example .env               # Windows: copy .env.example .env
-set -a; source .env; set +a        # carga las variables en esta terminal
+set -a; source .env; set +a        # loads the variables in this terminal
 ```
 
-En Windows (PowerShell), en lugar de la última línea:
+On Windows (PowerShell), instead of the last line:
 
 ```powershell
 Get-Content .env | Where-Object { $_ -match '^[A-Z]' } | ForEach-Object { $k,$v = $_ -split '=',2; Set-Item "env:$k" $v }
 ```
 
-Las variables solo valen para la terminal donde las cargas: si abres otra, vuelve a cargarlas.
+The variables only apply to the terminal where you load them: load them again in a new one.
 
-**5. Crea las tablas y tu usuario**
+**5. Create the tables and your user**
 
 ```bash
 python manage.py migrate
-python manage.py createsuperuser   # te pide usuario y contraseña
+python manage.py createsuperuser   # asks for a username and password
 ```
 
-**6. (Opcional) Carga citas de ejemplo**
+**6. (Optional) Load sample appointments**
 
 ```bash
 python manage.py demo
 ```
 
-**7. Abre la agenda**
+**7. Open the app**
 
 ```bash
 python manage.py runserver
 ```
 
-Entra en <http://127.0.0.1:8000> con el usuario que creaste. Verás el tablero **Hoy**; arriba está *Nueva cita*, que va interpretando lo que escribes. Pedidos, avisos y otros datos se gestionan en <http://127.0.0.1:8000/admin/>.
+Go to <http://127.0.0.1:8000> and sign in. You'll see the **Hoy** (today) board; *Nueva cita* at the top interprets what you type as you type it. Orders, reminders and other data are managed at <http://127.0.0.1:8000/admin/>.
 
-**8. Apunta una cita**
+**8. Add an appointment**
 
-En **Hoy → Nueva cita**: elige el día, escribe el cliente y la nota (`cambio aceite motor opel aceite 5w30`). Al lado ves lo que ha entendido (trabajo, recambios, aviso anual). Los clientes nuevos se crean solos; puedes corregir cualquier dato en `/admin/`. Si el servicio se repite, ya queda programado el aviso para el año siguiente.
+In **Hoy → Nueva cita**: pick the day, type the customer and the note (`cambio aceite motor opel aceite 5w30`). Next to it you see what was understood (job, parts, yearly reminder). New customers are created automatically; any value can be fixed in `/admin/`. If the job repeats, next year's reminder is already scheduled.
 
-**9. Lanza el trabajo diario**
+**9. Run the daily job**
 
 ```bash
 python manage.py run_daily
 ```
 
-Pide los recambios de las citas de mañana y envía los avisos que toquen. Sin configurar nada más, **no sale nada al exterior**: los pedidos y avisos se guardan en la carpeta `outbox/` para que puedas comprobarlos. En cada ficha hay botones *Pedir ahora* y *Hecha y facturar*.
+It orders the parts for tomorrow's appointments and sends the reminders that are due. With nothing else configured, **nothing leaves the machine**: orders and reminders are written to the `outbox/` folder so you can check them. Each appointment card has *Pedir ahora* (order now) and *Hecha y facturar* (done and invoice) buttons.
 
-**10. Prográmalo cada mañana**
+**10. Schedule it every morning**
 
-Linux/macOS (cron, 8:00 de lunes a viernes; ajusta rutas):
+Linux/macOS (cron, 8:00 Monday to Friday; adjust paths):
 
 ```
-0 8 * * 1-5  cd /ruta/taller-agenda && set -a && . ./.env && set +a && .venv/bin/python manage.py run_daily
+0 8 * * 1-5  cd /path/gemma-garage && set -a && . ./.env && set +a && .venv/bin/python manage.py run_daily
 ```
 
-Windows: Programador de tareas → ejecutar `.venv\Scripts\python.exe manage.py run_daily` en la carpeta del proyecto (con las variables definidas). Si un día no se ejecuta, la siguiente ejecución pide lo que falte.
+Windows: Task Scheduler → run `.venv\Scripts\python.exe manage.py run_daily` in the project folder (with the variables defined). If a day is missed, the next run orders whatever is missing.
 
-## Comodidades del frontal
+## Front-end conveniences
 
-- **Pedido** (`/pedido/`): revisa y corrige los recambios (cantidades, líneas) antes de enviarlos al proveedor. Si un pedido falla, aparece en rojo en *Hoy* para reintentarlo.
-- **Lista de compra** (`/compra/`): todos los recambios de un día, sumados y listos para imprimir.
-- **Editar cita**: botón *Editar* en cada ficha. Al cambiar la fecha o la repetición, el aviso anual se reprograma.
-- **Historial por matrícula**: al escribir una matrícula en *Nueva cita* aparecen las visitas anteriores y se puede reutilizar el cliente.
-- **Buscador** (cuadro de arriba): por matrícula, cliente, teléfono, vehículo o nota.
-- **Llamar / WhatsApp**: enlaces en cada ficha y en *Clientes* (a un teléfono de 9 cifras se le pone el +34).
-- **Tarifas** (`/tarifas/`): lo que cobras de mano de obra por cada trabajo (cambio de aceite 45 €, ITV 30 €…). Los recambios no tienen precio guardado, porque dependen del distribuidor: al pulsar *Hecha y facturar* escribes el precio de cada uno según su albarán, y la mano de obra sale ya rellena (puedes cambiarla para esa cita).
-- **Copia** (arriba a la derecha): descarga todos los datos en un archivo `.json`. Para restaurarlos: `python manage.py loaddata copia-taller-AAAA-MM-DD.json` (en una base de datos recién migrada).
+- **Order** (`/pedido/`): review and edit the parts (quantities, lines) before they go to the supplier. A failed order shows in red on *Hoy* so you can retry it.
+- **Shopping list** (`/compra/`): every part for a day, summed and ready to print.
+- **Edit appointment**: *Editar* button on each card. Changing the date or the repetition reschedules the yearly reminder.
+- **History by plate**: typing a plate in *Nueva cita* shows previous visits and lets you reuse the customer.
+- **Search** (top box): by plate, customer, phone, vehicle or note.
+- **Call / WhatsApp**: links on each card and in *Clientes* (a 9-digit phone gets +34).
+- **Tariffs** (`/tarifas/`): what you charge for labour per job (oil change €45, ITV €30…). Parts have no stored price, because they depend on the distributor: when you press *Hecha y facturar* you type each part's price from its delivery note, and labour comes pre-filled (you can change it for that appointment).
+- **Backup** (top right): downloads all the data as a `.json` file. To restore it: `python manage.py loaddata copia-taller-YYYY-MM-DD.json` (into a freshly migrated database).
 
-Si actualizas desde una versión anterior, ejecuta `python manage.py migrate` (añade el campo del último error de pedido y las tarifas de mano de obra).
+If you are upgrading from an earlier version, run `python manage.py migrate` (adds the last-order-error field and the labour tariffs).
 
-## Avisos por Telegram (gratis)
+## Telegram reminders (free)
 
-Un bot de Telegram **no puede escribir a un cliente que no haya hablado antes con él**. Por eso cada cliente debe abrir un enlace una sola vez.
+A Telegram bot **cannot message a customer who has never talked to it**. So each customer has to open a link once.
 
-1. En Telegram habla con **@BotFather**, escribe `/newbot` y sigue los pasos. Te da un **token** y un nombre de usuario.
-2. Rellena en `.env` `TELEGRAM_BOT_TOKEN` y `TELEGRAM_BOT_USERNAME`, y vuelve a cargar las variables.
-3. Deja el bot escuchando en una terminal aparte: `python manage.py telegram_bot`.
-4. **Tu chat de mecánico:** escribe `/id` a tu bot, copia el número en `TELEGRAM_OWNER_CHAT_ID` y recarga. Recibirás un resumen diario y los avisos de clientes sin Telegram.
-5. **Cada cliente:** abre la pantalla **Clientes**, copia su **enlace** y pásaselo (por WhatsApp o impreso). Cuando lo abra y pulse *Iniciar*, queda vinculado.
+1. In Telegram talk to **@BotFather**, send `/newbot` and follow the steps. It gives you a **token** and a username.
+2. Fill `TELEGRAM_BOT_TOKEN` and `TELEGRAM_BOT_USERNAME` in `.env` and reload the variables.
+3. Leave the bot listening in a separate terminal: `python manage.py telegram_bot`.
+4. **Your mechanic chat:** send `/id` to your bot, copy the number into `TELEGRAM_OWNER_CHAT_ID` and reload. You get a daily summary and the reminders of customers without Telegram.
+5. **Each customer:** open the **Clientes** screen, copy their **link** and send it to them (WhatsApp or printed). When they open it and press *Start*, they are linked.
 
-Si a un cliente le toca un aviso y aún no ha vinculado Telegram, el bot **te lo manda a ti** con su teléfono para que le llames.
+If a customer is due a reminder and hasn't linked Telegram yet, the bot **sends it to you** with their phone number so you can call them.
 
-## Pedido al proveedor
+## Parts supplier
 
-Por defecto es de prueba (`outbox/pedidos.jsonl`). Con `TALLER_SUPPLIER=email` y las variables `SMTP_*` y `SUPPLIER_EMAIL` (ver `.env.example`) se envía por correo. Bosch, Lozano y otros distribuidores no suelen ofrecer una API pública estándar; lo habitual es pedir por correo o por su portal. Para un portal concreto, crea otra clase con `send_order()` en `taller/channels.py`.
+By default it is a test supplier (`outbox/pedidos.jsonl`). With `TALLER_SUPPLIER=email` and the `SMTP_*` and `SUPPLIER_EMAIL` variables (see `.env.example`) it sends by email. Bosch, Lozano and other distributors don't usually offer a standard public API; ordering by email or through their portal is the norm. For a specific portal, add another `PartsSupplier` adapter in `taller/infrastructure/` (see Architecture).
 
-## IA local (opcional pero recomendada)
+## Local AI (optional but recommended)
 
-Instala [Ollama](https://ollama.com) y ejecuta `ollama pull gemma3`. Con Ollama en marcha, el programa lo usa solo. Sin él funciona igual con reglas para los casos habituales (aceite, ITV, frenos, filtros, neumáticos, batería, correa). Variables: `TALLER_MODEL`, `OLLAMA_URL`, `TALLER_NO_LLM=1` para desactivarla.
+Install [Ollama](https://ollama.com) and run `ollama pull gemma3`. With Ollama running, the app uses it automatically. Without it, it still works with rules for the usual jobs (oil, ITV, brakes, filters, tyres, battery, timing belt). Variables: `TALLER_MODEL`, `OLLAMA_URL`, and `TALLER_NO_LLM=1` to turn it off.
 
-## Seguridad
+The model only interprets text. Dates, orders and money are plain code, and the panel always says which engine answered and why Gemma wasn't used (not running, timeout, bad output).
 
-- Pensado para usarse en el equipo del taller. Para un servidor accesible desde internet: `DJANGO_DEBUG=0`, un `DJANGO_SECRET_KEY` largo y aleatorio, HTTPS y `DJANGO_ALLOWED_HOSTS`.
-- Los datos de clientes quedan en tu Postgres. Con Gemma local, las notas no salen del equipo.
-- Revisa las tarifas de mano de obra en *Tarifas*; los precios de los recambios los escribes al facturar. La factura es un borrador imprimible y no sustituye a un programa de facturación homologado.
-- Haz copias de seguridad de la base de datos.
+## Security
+
+- Meant to run on the workshop's own computer. For a server reachable from the internet: `DJANGO_DEBUG=0`, a long random `DJANGO_SECRET_KEY`, HTTPS and `DJANGO_ALLOWED_HOSTS`.
+- Customer data stays in your Postgres. With local Gemma, the notes never leave the machine.
+- Check the labour rates in *Tarifas*; you type part prices when invoicing. The invoice is a printable draft and does not replace certified invoicing software.
+- Back up the database.
+
+## Architecture
+
+The code follows a hexagonal (ports and adapters) layout under `taller/`:
+
+```
+taller/
+  domain/          entities (Django models), ports (ABCs), criteria, exceptions, pure rules
+  application/     one folder per use case: <name>_command.py / _query.py + its handler
+  infrastructure/  adapters: DB repositories, Ollama + rules parsers, suppliers, notifiers, Telegram
+  container.py     composition root: the only place that wires ports to adapters
+  views.py, admin.py, forms.py, management/   thin entry points that call handlers
+```
+
+- **Ports** (`domain/ports`): `NoteParser`, `PartsSupplier`, `ClientNotifier`, plus one repository interface per aggregate.
+- **Gemma is an adapter**: `OllamaNoteParser` is wrapped by `NoteParserWithFallback`, which falls back to `RulesNoteParser` and records why.
+- **Add a supplier** (e.g. a distributor portal): implement `PartsSupplier.send_order()` in `taller/infrastructure/` and select it in `container.parts_supplier()`.
+- **Tests** run use cases against in-memory fake ports (`taller/tests_application.py`), no database or network needed.
 
 ## Tests
 
@@ -192,8 +214,8 @@ Instala [Ollama](https://ollama.com) y ejecuta `ollama pull gemma3`. Con Ollama 
 python manage.py test taller
 ```
 
-Funcionan con Postgres (si tienes las variables cargadas) o con SQLite.
+They run on Postgres (if the variables are loaded) or on SQLite.
 
-## Licencia
+## License
 
 MIT.
