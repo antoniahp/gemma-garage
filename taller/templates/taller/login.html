@@ -1,0 +1,12 @@
+{% extends "taller/base.html" %}
+{% block title %}Entrar{% endblock %}
+{% block content %}
+<form class="login" method="post">{% csrf_token %}
+  <h1>Entrar</h1>
+  {% if form.errors %}<p class="msgs"><span class="error" style="padding:8px 12px;border-radius:6px;background:var(--err-bg)">Usuario o contraseña incorrectos.</span></p>{% endif %}
+  <div class="f"><label for="id_username">Usuario</label>{{ form.username }}</div>
+  <div class="f"><label for="id_password">Contraseña</label>{{ form.password }}</div>
+  <input type="hidden" name="next" value="{{ next }}">
+  <button class="btn main">Entrar</button>
+</form>
+{% endblock %}

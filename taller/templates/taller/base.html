@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}Agenda{% endblock %} · Taller</title>
+{% include "taller/_css.html" %}
+</head>
+<body>
+<header class="bar"><div class="bar-in">
+  <a class="brand" href="{% url 'home' %}"><i aria-hidden="true"></i>Taller</a>
+  {% if user.is_authenticated %}
+  <nav class="tabs" aria-label="Secciones">
+    <a href="{% url 'home' %}" {% if tab == 'home' %}aria-current="page"{% endif %}>Hoy</a>
+    <a href="{% url 'week' %}" {% if tab == 'week' %}aria-current="page"{% endif %}>Semana</a>
+    <a href="{% url 'order_review' %}" {% if tab == 'order' %}aria-current="page"{% endif %}>Pedido</a>
+    <a href="{% url 'clients' %}" {% if tab == 'clients' %}aria-current="page"{% endif %}>Clientes</a>
+    <a href="{% url 'invoices' %}" {% if tab == 'invoices' %}aria-current="page"{% endif %}>Facturas</a>
+  </nav>
+  <form class="sbox" action="{% url 'search' %}" method="get" role="search">
+    <input type="search" name="q" value="{{ q|default:'' }}" placeholder="Buscar matrícula, cliente…" aria-label="Buscar">
+  </form>
+  <div class="who">
+    <a href="{% url 'prices' %}" {% if tab == 'prices' %}aria-current="page"{% endif %}>Tarifas</a>
+    <a href="{% url 'backup' %}" title="Descarga todos los datos en un archivo">Copia</a>
+    <a href="{% url 'admin:index' %}">Administración</a>
+    <form method="post" action="{% url 'logout' %}">{% csrf_token %}<button>Salir</button></form>
+  </div>
+  {% endif %}
+</div></header>
+<main>
+  {% if messages %}<ul class="msgs" role="status">{% for m in messages %}<li class="{{ m.tags }}">{{ m }}</li>{% endfor %}</ul>{% endif %}
+  {% block content %}{% endblock %}
+</main>
+<script>
+(function(){
+  function busy(form,btn,label){
+    form.dataset.sent='1';
+    if(btn){
+      btn.dataset.old=btn.innerHTML;
+      btn.innerHTML='<span class="spin" aria-hidden="true"></span><span>'+label+'</span>';
+      btn.classList.add('busy'); btn.setAttribute('aria-disabled','true');
+    }
+    var bar=document.createElement('div'); bar.className='busybar'; bar.setAttribute('role','status');
+    bar.setAttribute('aria-label',label); document.body.appendChild(bar);
+  }
+  document.addEventListener('submit',function(e){
+    var f=e.target; if(!f.dataset) return;
+    var btn=e.submitter||f.querySelector('button:not([type=button])');
+    var label=(btn&&btn.dataset.busy)||f.dataset.busy; if(!label) return;
+    if(f.dataset.sent){e.preventDefault();return}
+    e.preventDefault(); busy(f,btn,label);
+    if(btn&&btn.name){var h=document.createElement('input');h.type='hidden';h.name=btn.name;h.value=btn.value;f.appendChild(h)}
+    // se deja ver el aviso al menos un instante, aunque el pedido sea inmediato
+    setTimeout(function(){ HTMLFormElement.prototype.submit.call(f) },700);
+  });
+  window.addEventListener('pageshow',function(e){ if(!e.persisted) return;
+    document.querySelectorAll('form[data-sent]').forEach(function(f){delete f.dataset.sent;
+      f.querySelectorAll('button.busy').forEach(function(b){b.innerHTML=b.dataset.old;b.classList.remove('busy');b.removeAttribute('aria-disabled')})});
+    document.querySelectorAll('.busybar').forEach(function(x){x.remove()}) });
+  // editor de recambios: añadir línea
+  document.addEventListener('click',function(e){
+    var add=e.target.closest('.add-row'); if(!add) return;
+    var box=add.closest('.peditor'), rows=box.querySelectorAll('.prow:not(.phead)'), last=rows[rows.length-1];
+    var c=last.cloneNode(true); c.querySelectorAll('input').forEach(function(i){ if(!i.classList.contains('unit')&&!i.name.startsWith('unit')) i.value=''; });
+    last.after(c); c.querySelector('input').focus();
+  });
+})();
+</script>
+{% block scripts %}{% endblock %}
+</body>
+</html>

@@ -1,0 +1,16 @@
+# Solo la base de datos. La aplicación se ejecuta con python (ver README).
+services:
+  db:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: taller
+      POSTGRES_USER: taller
+      POSTGRES_PASSWORD: taller
+    ports:
+      - "127.0.0.1:5432:5432"   # solo accesible desde este equipo
+    volumes:
+      - taller_pgdata:/var/lib/postgresql/data
+
+volumes:
+  taller_pgdata:

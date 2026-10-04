@@ -1,0 +1,18 @@
+{% extends "taller/base.html" %}
+{% block title %}Tarifas{% endblock %}
+{% block content %}
+<div class="head"><div><h1>Tarifas de mano de obra</h1>
+  <p class="sub">Lo que cobras por cada trabajo, sin IVA ({{ iva }} %). Los recambios no llevan precio aquí: dependen del distribuidor y se escriben al facturar.</p></div></div>
+<form method="post" novalidate>{% csrf_token %}
+<table class="tbl prices"><thead><tr><th>Trabajo</th><th class="num">Mano de obra</th></tr></thead><tbody>
+{% for r in rows %}<tr>
+  <td>{{ r.name }}<input type="hidden" name="p_name" value="{{ r.name }}"></td>
+  <td class="num"><input name="p_price" value="{{ r.price }}" inputmode="decimal" placeholder="Sin precio" aria-label="Mano de obra de {{ r.name }}"> <span class="no">€</span></td>
+</tr>{% endfor %}
+<tr><td><input name="new_name" placeholder="Otro trabajo (ej.: alineación)" aria-label="Nuevo trabajo"></td>
+  <td class="num"><input name="new_price" placeholder="0,00" inputmode="decimal" aria-label="Precio del nuevo trabajo"> <span class="no">€</span></td></tr>
+</tbody></table>
+<p class="sub">Para quitar una tarifa, deja su precio vacío. En cada cita puedes cambiar el importe al facturar.</p>
+<div class="submit"><button class="btn main" data-busy="Guardando…">Guardar tarifas</button></div>
+</form>
+{% endblock %}

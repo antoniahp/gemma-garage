@@ -1,0 +1,18 @@
+{% extends "taller/base.html" %}
+{% block title %}Lista de compra{% endblock %}
+{% block content %}
+<div class="head">
+  <div><h1>Lista de compra</h1><p class="sub">Para las citas del {{ day|date:"l j \d\e F" }}</p></div>
+  <div class="weeknav">
+    <a class="btn" href="?d={{ prev|date:'Y-m-d' }}">Día anterior</a>
+    <a class="btn" href="?d={{ next|date:'Y-m-d' }}">Día siguiente</a>
+    <button class="btn main" type="button" onclick="window.print()">Imprimir</button>
+  </div>
+</div>
+{% if rows %}
+<table class="tbl"><thead><tr><th>Recambio</th><th>Detalle</th><th class="num">Cantidad</th><th>Para</th></tr></thead><tbody>
+{% for r in rows %}<tr><td>{{ r.name }}</td><td>{{ r.spec|default:"—" }}</td><td class="num"><strong>{{ r.qty }}</strong> {{ r.unit }}</td><td>{{ r.cars|join:", " }}</td></tr>{% endfor %}
+</tbody></table>
+<p class="sub">{{ appts|length }} cita{{ appts|length|pluralize }}. {% for a in appts %}{% if a.ordered %}Ya pedido: {{ a.client.name }}. {% endif %}{% endfor %}</p>
+{% else %}<div class="empty-col">No hay recambios que comprar para ese día.</div>{% endif %}
+{% endblock %}

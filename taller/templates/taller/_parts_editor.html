@@ -1,0 +1,17 @@
+<div class="peditor">
+  <div class="prow phead" aria-hidden="true"><span>Recambio</span><span>Detalle</span><span>Cantidad</span><span>Unidad</span></div>
+  {% for p in a.parts %}
+  <div class="prow">
+    <input name="name_{{ a.pk }}" value="{{ p.name }}" aria-label="Recambio" placeholder="Recambio">
+    <input name="spec_{{ a.pk }}" value="{{ p.spec }}" aria-label="Detalle" placeholder="Ej.: 5W30">
+    <input name="qty_{{ a.pk }}" value="{{ p.qty }}" aria-label="Cantidad" inputmode="decimal">
+    <input name="unit_{{ a.pk }}" value="{{ p.unit }}" aria-label="Unidad" class="unit">
+  </div>{% endfor %}
+  <div class="prow">
+    <input name="name_{{ a.pk }}" value="" aria-label="Recambio" placeholder="Añadir recambio">
+    <input name="spec_{{ a.pk }}" value="" aria-label="Detalle" placeholder="Detalle">
+    <input name="qty_{{ a.pk }}" value="1" aria-label="Cantidad" inputmode="decimal">
+    <input name="unit_{{ a.pk }}" value="ud" aria-label="Unidad" class="unit">
+  </div>
+  <div class="phint"><button type="button" class="btn small ghost add-row">Añadir otra línea</button><span>Para quitar una línea, borra su nombre.</span></div>
+</div>

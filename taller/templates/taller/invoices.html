@@ -1,0 +1,10 @@
+{% extends "taller/base.html" %}
+{% block title %}Facturas{% endblock %}
+{% block content %}
+<div class="head"><div><h1>Facturas</h1><p class="sub">Se crean al pulsar «Hecha y facturar» en una cita.</p></div></div>
+{% if invoices %}
+<table class="tbl"><thead><tr><th>Número</th><th>Fecha</th><th>Cliente</th><th>Trabajo</th><th class="num">Total</th><th></th></tr></thead><tbody>
+{% for i in invoices %}<tr><td>{{ i.number }}</td><td>{{ i.created_at|date:"d/m/Y" }}</td><td>{{ i.appointment.client.name }}</td><td>{{ i.appointment.service }}</td><td class="num">{{ i.total }} €</td>
+<td><a class="btn small" href="{% url 'invoice' i.appointment_id %}" target="_blank">Abrir</a></td></tr>{% endfor %}</tbody></table>
+{% else %}<div class="empty-col">Todavía no hay facturas.</div>{% endif %}
+{% endblock %}

@@ -1,0 +1,27 @@
+<article class="ficha s-{{ a.order_state }}">
+  <div class="top">
+    <div>
+      <h3 class="t">{{ a.service|default:a.note }}</h3>
+      <div class="who2">{{ a.client.name }}{% if a.vehicle %} · {{ a.vehicle }}{% endif %}
+        {% if a.client.tel_url %}· <a href="{{ a.client.tel_url }}">Llamar</a> · <a href="{{ a.client.whatsapp_url }}" target="_blank" rel="noopener">WhatsApp</a>{% endif %}</div>
+    </div>
+    {% if a.plate %}<span class="plate"><b>E</b><span>{{ a.plate }}</span></span>{% endif %}
+  </div>
+  {% if a.parts %}<div class="parts">{% for p in a.parts %}<span class="chip">{{ p.qty }} {{ p.name }} {{ p.spec }}</span>{% endfor %}</div>{% endif %}
+  {% if a.service and a.note != a.service %}<div class="note-raw">“{{ a.note }}”</div>{% endif %}
+  {% if a.order_error and not a.ordered %}<p class="errline">No se pudo pedir: {{ a.order_error }}</p>{% endif %}
+  <div class="foot">
+    <span class="pill {{ a.order_state }}">{{ a.order_label }}</span>
+    <div class="acts">
+      {% if a.status == 'pendiente' %}<a class="btn small ghost" href="{% url 'appointment_edit' a.pk %}">Editar</a>{% endif %}
+      {% if a.status == 'pendiente' and a.parts and not a.ordered %}
+      <form method="post" action="{% url 'appointment_order' a.pk %}" data-busy="Pidiendo recambios…">{% csrf_token %}<input type="hidden" name="next" value="{{ request.get_full_path }}"><button class="btn small">Pedir ahora</button></form>
+      {% endif %}
+      {% if a.status == 'pendiente' %}
+      <a class="btn small main" href="{% url 'appointment_invoice' a.pk %}">Hecha y facturar</a>
+      {% elif a.invoice %}
+      <a class="btn small ghost" href="{% url 'invoice' a.pk %}" target="_blank">Factura {{ a.invoice.number }}</a>
+      {% endif %}
+    </div>
+  </div>
+</article>

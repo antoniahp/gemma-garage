@@ -1,0 +1,15 @@
+{% extends "taller/base.html" %}
+{% block title %}Clientes{% endblock %}
+{% block content %}
+<div class="head"><div><h1>Clientes</h1><p class="sub">Para que un cliente reciba avisos por Telegram, pásale su enlace una vez.</p></div>
+  <form class="search" method="get"><input type="search" name="q" value="{{ q }}" placeholder="Nombre o teléfono" aria-label="Buscar"><button class="btn">Buscar</button></form></div>
+{% if clients %}
+<table class="tbl"><thead><tr><th>Nombre</th><th>Teléfono</th><th class="num">Citas</th><th>Aviso anual</th><th>Telegram</th></tr></thead><tbody>
+{% for c in clients %}<tr>
+  <td><a href="{% url 'admin:taller_client_change' c.pk %}">{{ c.name }}</a></td>
+  <td>{% if c.phone %}{{ c.phone }}<br><a class="copy" href="{{ c.tel_url }}">Llamar</a> · <a class="copy" href="{{ c.whatsapp_url }}" target="_blank" rel="noopener">WhatsApp</a>{% else %}—{% endif %}</td><td class="num">{{ c.visits }}</td>
+  <td>{% if c.waiting %}{{ c.waiting }} programado{{ c.waiting|pluralize }}{% else %}<span class="no">—</span>{% endif %}</td>
+  <td>{% if c.telegram_linked %}<span class="ok">Vinculado</span>{% elif c.telegram_link %}<span class="no">Pendiente</span><br><a class="copy" href="{{ c.telegram_link }}" target="_blank" rel="noopener">{{ c.telegram_link }}</a>{% else %}<span class="no">Configura el bot</span>{% endif %}</td>
+</tr>{% endfor %}</tbody></table>
+{% else %}<div class="empty-col">{% if q %}Ningún cliente coincide con “{{ q }}”.{% else %}Aún no hay clientes. Se crean solos al apuntar una cita.{% endif %}</div>{% endif %}
+{% endblock %}

@@ -1,0 +1,33 @@
+{% extends "taller/base.html" %}
+{% block title %}Pedido{% endblock %}
+{% block content %}
+<div class="head">
+  <div><h1>Pedido de recambios</h1><p class="sub">Revisa lo que se va a pedir. Puedes cambiar cantidades o quitar líneas antes de enviarlo.</p></div>
+  <a class="btn" href="{% url 'shopping' %}?d={{ shopping_day|date:'Y-m-d' }}">Lista de compra de {{ shopping_day|date:"l j"|lower }}</a>
+</div>
+{% if rows %}
+<form method="post">{% csrf_token %}
+  <div class="stack">
+  {% for r in rows %}{% with a=r.a %}
+    <section class="ficha s-{{ a.order_state }} rev">
+      <input type="hidden" name="ids" value="{{ a.pk }}">
+      <div class="top">
+        <label class="send"><input type="checkbox" name="send" value="{{ a.pk }}" {% if r.checked %}checked{% endif %}>
+          <span><strong>{{ a.service|default:a.note }}</strong><br><span class="who2">{{ a.client.name }}{% if a.vehicle %} · {{ a.vehicle }}{% endif %} · cita el {{ a.date|date:"l j" }}</span></span></label>
+        <div class="right">{% if a.plate %}<span class="plate"><b>E</b><span>{{ a.plate }}</span></span>{% endif %}
+          <span class="pill {{ a.order_state }}">{{ a.order_label }}</span></div>
+      </div>
+      {% if a.order_error %}<p class="errline">{{ a.order_error }}</p>{% endif %}
+      {% include "taller/_parts_editor.html" %}
+    </section>
+  {% endwith %}{% endfor %}
+  </div>
+  <div class="sticky">
+    <button name="do" value="save" class="btn" data-busy="Guardando…">Guardar cambios</button>
+    <button name="do" value="send" class="btn main" data-busy="Pidiendo recambios…">Enviar pedido seleccionado</button>
+  </div>
+</form>
+{% else %}
+<div class="empty-col">No hay recambios pendientes de pedir en los próximos 7 días.</div>
+{% endif %}
+{% endblock %}

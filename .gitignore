@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+*.sqlite3
+outbox/
+.env
+copia-antes-de-demo-*.json
+venv/
+.venv/
+.idea/
+.DS_Store

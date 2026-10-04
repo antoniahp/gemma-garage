@@ -1,0 +1,20 @@
+{% extends "taller/base.html" %}
+{% block title %}Editar cita{% endblock %}
+{% block content %}
+<div class="head"><div><h1>Editar cita</h1><p class="sub">{{ a.service|default:a.note }} · {{ a.client.name }}</p></div></div>
+<form method="post" class="new edit" novalidate>{% csrf_token %}
+  <div class="fields wide">
+    <div class="f c-date"><label for="id_date">Día</label>{{ form.date }}{% for e in form.date.errors %}<p class="err">{{ e }}</p>{% endfor %}</div>
+    <div class="f c-client"><label for="id_client_name">Cliente</label>{{ form.client_name }}{% for e in form.client_name.errors %}<p class="err">{{ e }}</p>{% endfor %}</div>
+    <div class="f c-phone"><label for="id_phone">Teléfono</label>{{ form.phone }}</div>
+    <div class="f c-plate"><label for="id_plate">Matrícula</label>{{ form.plate }}</div>
+    <div class="f c-note"><label for="id_note">Qué hay que hacer</label>{{ form.note }}{% for e in form.note.errors %}<p class="err">{{ e }}</p>{% endfor %}</div>
+    <div class="f c-phone"><label for="id_service">Trabajo</label>{{ form.service }}</div>
+    <div class="f c-plate"><label for="id_vehicle">Coche (marca y modelo)</label>{{ form.vehicle }}</div>
+    <div class="f c-date"><label for="id_repeat_months">Avisar cada (meses)</label>{{ form.repeat_months }}{% for e in form.repeat_months.errors %}<p class="err">{{ e }}</p>{% endfor %}</div>
+    <label class="check c-client"><input type="checkbox" name="reinterpret" id="id_reinterpret"> {{ form.reinterpret.label }}</label>
+    <div class="c-note"><h3>Recambios</h3>{% include "taller/_parts_editor.html" %}</div>
+  </div>
+  <div class="submit"><a class="btn ghost" href="{% url 'week' %}?d={{ a.date|date:'Y-m-d' }}">Cancelar</a><button class="btn main">Guardar cita</button></div>
+</form>
+{% endblock %}

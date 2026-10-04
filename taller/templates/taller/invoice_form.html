@@ -1,0 +1,47 @@
+{% extends "taller/base.html" %}
+{% block title %}Facturar{% endblock %}
+{% block content %}
+<div class="head"><div><h1>Facturar</h1><p class="sub">{{ a.service|default:a.note }} · {{ a.client.name }}{% if a.plate %} · {{ a.plate }}{% endif %}</p></div></div>
+<form method="post" class="new edit" id="invform" data-iva="{{ iva|stringformat:'f' }}" novalidate>{% csrf_token %}
+  <div>
+    {% if rows %}
+    <h2>Recambios</h2>
+    <p class="sub">Escribe el precio de cada recambio según el albarán del distribuidor (sin IVA).</p>
+    <table class="tbl prices"><thead><tr><th>Recambio</th><th class="num">Cantidad</th><th class="num">Precio unidad</th><th class="num">Importe</th></tr></thead><tbody>
+    {% for r in rows %}<tr>
+      <td>{{ r.p.name }} {{ r.p.spec }}</td><td class="num">{{ r.p.qty }} {{ r.p.unit }}</td>
+      <td class="num"><input name="price_{{ r.i }}" value="{{ r.price }}" inputmode="decimal" placeholder="0,00" data-qty="{{ r.p.qty }}" aria-label="Precio de {{ r.p.name }}"> <span class="no">€</span></td>
+      <td class="num line-total">0,00 €</td></tr>{% endfor %}
+    </tbody></table>
+    {% endif %}
+    <h2 style="margin-top:18px">Mano de obra</h2>
+    <div class="prow2"><label for="id_labor">Mano de obra: {{ a.service|default:a.note }}</label>
+      <span><input id="id_labor" name="labor" value="{{ labor }}" inputmode="decimal" placeholder="0,00" data-qty="1"> €</span></div>
+    <p class="sub">{% if labor %}Viene de tus tarifas; puedes cambiarlo solo para esta cita.{% else %}Este trabajo no tiene tarifa. Ponla aquí o en <a href="{% url 'prices' %}">Tarifas</a>.{% endif %}</p>
+    <h2 style="margin-top:18px">Otra línea (opcional)</h2>
+    <div class="prow2"><input name="extra_concept" value="{{ extra_concept }}" placeholder="Concepto (ej.: desplazamiento)" aria-label="Concepto adicional">
+      <span><input name="extra_price" value="{{ extra_price }}" inputmode="decimal" placeholder="0,00" data-qty="1"> €</span></div>
+    <dl class="totals"><dt>Base imponible</dt><dd id="t-base">0,00 €</dd><dt>IVA ({{ iva_pct }} %)</dt><dd id="t-iva">0,00 €</dd><dt>Total</dt><dd id="t-total"><strong>0,00 €</strong></dd></dl>
+  </div>
+  <div class="submit"><a class="btn ghost" href="{% url 'home' %}">Cancelar</a><button class="btn main" data-busy="Generando factura…">Hecha y facturar</button></div>
+</form>
+<script>
+(function(){
+  var f=document.getElementById('invform'); if(!f) return;
+  var iva=parseFloat(f.dataset.iva)||0;
+  function num(v){return parseFloat(String(v).replace(',','.'))||0}
+  function eur(x){return x.toFixed(2).replace('.',',')+' €'}
+  function calc(){
+    var base=0;
+    f.querySelectorAll('input[data-qty]').forEach(function(i){
+      var amt=num(i.value)*num(i.dataset.qty); base+=amt;
+      var cell=i.closest('tr'); if(cell){cell.querySelector('.line-total').textContent=eur(amt)}
+    });
+    document.getElementById('t-base').textContent=eur(base);
+    document.getElementById('t-iva').textContent=eur(base*iva);
+    document.getElementById('t-total').innerHTML='<strong>'+eur(base*(1+iva))+'</strong>';
+  }
+  f.addEventListener('input',calc); calc();
+})();
+</script>
+{% endblock %}

@@ -1,0 +1,9 @@
+{% extends "taller/base.html" %}
+{% block title %}Buscar{% endblock %}
+{% block content %}
+<div class="head"><div><h1>{% if q %}Resultados para «{{ q }}»{% else %}Buscar{% endif %}</h1>
+  <p class="sub">Busca por matrícula, cliente, teléfono, vehículo o lo que pusiste en la nota.</p></div></div>
+{% if found %}<div class="board"><div class="stack">{% for a in found %}{% include "taller/_ficha.html" %}{% endfor %}</div></div>
+{% elif q %}<div class="empty-col">No he encontrado nada con «{{ q }}».</div>
+{% else %}<div class="empty-col">Escribe algo en el cuadro de arriba.</div>{% endif %}
+{% endblock %}

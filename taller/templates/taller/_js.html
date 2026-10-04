@@ -1,0 +1,66 @@
+<script>
+(function(){
+  var note=document.getElementById('id_note'); var box=document.getElementById('read-box');
+  if(!note||!box) return;
+  var url=box.dataset.url, timer, last='', seq=0, inflight=false, car=document.getElementById('id_vehicle');
+  var HEAD='<h3>Lo que he entendido</h3>';
+  function esc(s){return String(s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]})}
+  function render(d){
+    var rows='', warn='';
+    rows+='<dt>Trabajo</dt><dd>'+esc(d.service||'No lo reconozco todavía')+'</dd>';
+    if(d.vehicle) rows+='<dt>Vehículo</dt><dd>'+esc(d.vehicle)+'</dd>';
+    if(d.parts&&d.parts.length){
+      rows+='<dt>Recambios</dt><dd><div class="chips">'+d.parts.map(function(p){
+        if(/aceite motor/i.test(p.name)&&!p.spec) warn='Falta la viscosidad del aceite (por ejemplo 5W30).';
+        return '<span class="chip">'+esc((p.qty+' '+p.name+' '+(p.spec||'')).trim())+'</span>'}).join('')+'</div></dd>';
+    } else rows+='<dt>Recambios</dt><dd>Ninguno</dd>';
+    if(d.repeat_months) rows+='<dt>Aviso</dt><dd>Al cliente, cada '+(d.repeat_months%12===0?(d.repeat_months/12)+(d.repeat_months===12?' año':' años'):d.repeat_months+' meses')+'</dd>';
+    var gemma=/^ollama/.test(d.engine||'');
+    var eng=gemma?'Entendido con Gemma ('+esc(d.engine.split(':')[1]||'')+'), en tu ordenador'
+                 :'Entendido con reglas simples (Gemma no está activo'+(d.llm_error?': '+esc(d.llm_error):'')+'). Puede fallar con notas poco habituales.';
+    box.innerHTML=HEAD+'<dl>'+rows+'</dl>'+(warn?'<p class="warnline">'+warn+'</p>':'')+
+      '<p class="engine'+(gemma?' gemma':'')+'">'+eng+'</p>';
+  }
+  function ask(){
+    var v=note.value.trim(), cv=car?car.value.trim():''; if((v+'|'+cv)===last) return;
+    if(inflight) return;   // se espera a que acabe la anterior: así no se acumulan peticiones en Gemma
+    last=v+'|'+cv;
+    var mine=++seq;
+    if(!v){box.innerHTML=HEAD+'<p class="empty">Escribe la nota y aquí verás el trabajo, los recambios y el aviso anual.</p>';return}
+    box.innerHTML=HEAD+'<p class="think"><span class="spin" aria-hidden="true"></span> Pensando…</p>';
+    inflight=true;
+    fetch(url+'?note='+encodeURIComponent(v)+'&vehicle='+encodeURIComponent(cv),{headers:{'Accept':'application/json'}})
+      .then(function(r){return r.json()}).then(function(d){ if(mine===seq) render(d) })
+      .catch(function(){ if(mine===seq) box.innerHTML=HEAD+'<p class="empty">No he podido interpretar la nota ahora. Puedes apuntarla igualmente.</p>' })
+      .then(function(){ inflight=false; var nv=note.value.trim()+'|'+(car?car.value.trim():''); if(nv!==last) ask(); });
+  }
+  note.addEventListener('input',function(){clearTimeout(timer);timer=setTimeout(ask,900)});
+  if(car) car.addEventListener('input',function(){clearTimeout(timer);timer=setTimeout(ask,900)});
+  ask();
+})();
+(function(){
+  var plate=document.getElementById('id_plate'), box=document.getElementById('hist');
+  if(!plate||!box) return;
+  var timer,last='';
+  function esc(s){return String(s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]})}
+  function show(d){
+    if(!d.found){box.hidden=true;box.innerHTML='';return}
+    var v=d.visits.map(function(x){return '<li><strong>'+esc(x.date)+'</strong> · '+esc(x.service)+(x.parts?' ('+esc(x.parts)+')':'')+'</li>'}).join('');
+    box.innerHTML='<div class="hist"><strong>Ya ha venido:</strong> '+esc(d.client)+(d.vehicle?' · '+esc(d.vehicle):'')+'<ul>'+v+'</ul>'+
+      '<button type="button" class="btn small" id="usar">Usar cliente, teléfono y coche</button></div>';
+    box.hidden=false;
+    document.getElementById('usar').onclick=function(){
+      var c=document.getElementById('id_client_name'), p=document.getElementById('id_phone'), v=document.getElementById('id_vehicle');
+      c.value=d.client; if(!p.value) p.value=d.phone||''; if(v&&!v.value) v.value=d.vehicle||'';
+    };
+  }
+  plate.addEventListener('input',function(){
+    clearTimeout(timer);
+    timer=setTimeout(function(){
+      var v=plate.value.trim(); if(v===last) return; last=v;
+      fetch(box.dataset.url+'?plate='+encodeURIComponent(v),{headers:{'Accept':'application/json'}})
+        .then(function(r){return r.json()}).then(show).catch(function(){});
+    },300);
+  });
+})();
+</script>

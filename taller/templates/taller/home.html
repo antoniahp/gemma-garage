@@ -1,0 +1,61 @@
+{% extends "taller/base.html" %}
+{% block title %}Hoy{% endblock %}
+{% block content %}
+<div class="head">
+  <div><h1>{{ today|date:"l j \d\e F"|capfirst }}</h1><p class="sub">Apunta como en papel; el programa entiende el resto.</p></div>
+  <div class="acts">
+    <a class="btn" href="{% url 'order_review' %}">Revisar pedido</a>
+    <form method="post" action="{% url 'run_daily' %}" data-busy="Pidiendo recambios y enviando avisos…">{% csrf_token %}<input type="hidden" name="next" value="{% url 'home' %}">
+    <button class="btn">Pedir recambios y enviar avisos ahora</button></form>
+  </div>
+</div>
+{% if failed %}<div class="alert fail"><strong>{{ failed }} pedido{{ failed|pluralize }} no se {{ failed|pluralize:"ha,han" }} podido enviar.</strong>
+  <a class="btn" href="{% url 'order_review' %}">Revisar y reintentar</a></div>{% endif %}
+
+{% if to_order %}
+<div class="alert"><strong>{{ to_order|length }} cita{{ to_order|length|pluralize }} con recambios por pedir hoy.</strong>
+  <form method="post" action="{% url 'run_daily' %}" data-busy="Pidiendo recambios…">{% csrf_token %}<input type="hidden" name="next" value="{% url 'home' %}"><button class="btn main">Pedir todo</button></form>
+</div>
+{% endif %}
+
+<form class="new" method="post" action="{% url 'appointment_create' %}" data-busy="Apuntando cita…" novalidate>
+  {% csrf_token %}
+  <h2>Nueva cita</h2>
+  <div class="fields">
+    <div class="f c-date"><label for="id_date">Día</label>{{ form.date }}{% for e in form.date.errors %}<p class="err">{{ e }}</p>{% endfor %}</div>
+    <div class="f c-client"><label for="id_client_name">Cliente</label><input type="text" name="client_name" id="id_client_name" list="clientes" value="{{ form.client_name.value|default:'' }}" autocomplete="off">{% for e in form.client_name.errors %}<p class="err">{{ e }}</p>{% endfor %}</div>
+    <div class="f c-third"><label for="id_phone">Teléfono</label>{{ form.phone }}</div>
+    <div class="f c-third"><label for="id_vehicle">Coche (marca y modelo)</label>{{ form.vehicle }}</div>
+    <div class="f c-third"><label for="id_plate">Matrícula</label>{{ form.plate }}</div>
+    <div class="c-hist" id="hist" data-url="{% url 'history' %}" hidden></div>
+    <div class="f c-note"><label for="id_note">Qué hay que hacer</label>{{ form.note }}{% for e in form.note.errors %}<p class="err">{{ e }}</p>{% endfor %}</div>
+  </div>
+  <div class="read" id="read-box" data-url="{% url 'interpret' %}" aria-live="polite">
+    <h3>Lo que he entendido</h3><p class="empty">Escribe la nota y aquí verás el trabajo, los recambios y el aviso anual.</p>
+  </div>
+  <div class="submit"><button class="btn main">Apuntar cita</button></div>
+  <datalist id="clientes">{% for n in clients %}<option value="{{ n }}">{% endfor %}</datalist>
+</form>
+
+<div class="board">
+  <section class="col"><header><h2>Hoy</h2><span>{{ today|date:"j M" }}</span></header>
+    <div class="stack">{% for a in today_list %}{% include "taller/_ficha.html" %}{% empty %}<div class="empty-col">No hay citas hoy.</div>{% endfor %}</div>
+  </section>
+  <section class="col"><header><h2>Mañana</h2><span>{{ tomorrow|date:"j M" }}</span></header>
+    <div class="stack">{% for a in tomorrow_list %}{% include "taller/_ficha.html" %}{% empty %}<div class="empty-col">No hay citas mañana.</div>{% endfor %}</div>
+  </section>
+</div>
+
+{% if late_list %}
+<section class="late"><div class="col"><header><h2>Sin cerrar</h2><span>citas pasadas sin facturar</span></header></div>
+  <div class="board"><div class="stack">{% for a in late_list %}{% include "taller/_ficha.html" %}{% endfor %}</div></div>
+</section>
+{% endif %}
+
+{% if reminders %}
+<section class="side"><h2>Próximos avisos a clientes</h2>
+  <ul>{% for r in reminders %}<li><strong>{{ r.send_on|date:"j M Y" }}</strong> · {{ r.client.name }}</li>{% endfor %}</ul>
+</section>
+{% endif %}
+{% endblock %}
+{% block scripts %}{% include "taller/_js.html" %}{% endblock %}

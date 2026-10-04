@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>Factura {{ inv.number }}</title>
+<style>
+  body{font:15px system-ui,sans-serif;max-width:720px;margin:30px auto;padding:0 16px;color:#111}
+  table{width:100%;border-collapse:collapse;margin:20px 0}
+  td,th{padding:8px;border-bottom:1px solid #ddd;text-align:left}
+  td:nth-child(n+2),th:nth-child(n+2){text-align:right}
+  .t{text-align:right} small{color:#555}
+  @media print{small{display:none}}
+</style>
+</head>
+<body>
+<h1>Factura {{ inv.number }}</h1>
+<p>Fecha: {{ inv.created_at|date:"d/m/Y" }}<br>
+Cliente: {{ appt.client.name }}<br>
+Vehículo: {{ appt.vehicle }} {{ appt.plate }}</p>
+<table>
+  <tr><th>Concepto</th><th>Cant.</th><th>Precio</th><th>Importe</th></tr>
+  {% for l in inv.lines %}
+  <tr><td>{{ l.concept }}</td><td>{{ l.qty }}</td><td>{{ l.unit_price }} €</td><td>{{ l.amount }} €</td></tr>
+  {% endfor %}
+</table>
+<p class="t">Base imponible: {{ inv.subtotal }} €<br>
+IVA (21 %): {{ inv.iva }} €<br>
+<strong>Total: {{ inv.total }} €</strong></p>
+<p><small><a href="/">← Volver a la agenda</a><br>Borrador imprimible con los precios que escribiste al facturar. No sustituye a un programa de facturación homologado.</small></p>
+<script>window.addEventListener('load', function(){ setTimeout(function(){ window.print() }, 300) })</script>
+</body>
+</html>

@@ -1,0 +1,20 @@
+{% extends "taller/base.html" %}
+{% block title %}Semana{% endblock %}
+{% block content %}
+<div class="head">
+  <div><h1>Semana del {{ start|date:"j" }} al {{ end|date:"j \d\e F" }}</h1></div>
+  <div class="weeknav">
+    <a class="btn" href="?d={{ prev|date:'Y-m-d' }}">Anterior</a>
+    <a class="btn" href="{% url 'week' %}">Esta semana</a>
+    <a class="btn" href="?d={{ next|date:'Y-m-d' }}">Siguiente</a>
+  </div>
+</div>
+<div class="wk">
+  {% for d in days %}
+  <section class="day {% if d.is_today %}today{% endif %} {% if d.weekend %}weekend{% endif %}">
+    <h3>{{ d.date|date:"l j" }}{% if d.is_today %}<small>hoy</small>{% endif %}</h3>
+    <div class="stack">{% for a in d.items %}{% include "taller/_ficha.html" %}{% empty %}<span class="no">Libre</span>{% endfor %}</div>
+  </section>
+  {% endfor %}
+</div>
+{% endblock %}
