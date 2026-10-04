@@ -1,6 +1,5 @@
 # Gemma Garage
 
-**English** · [Español](README.es.md)
 
 *A local-first appointment book for a car workshop. A local Gemma model reads the mechanic's notes and does the paperwork.*
 
